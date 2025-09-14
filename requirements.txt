@@ -1,0 +1,11 @@
+openai
+pydantic
+GitPython
+unidiff
+tree-sitter
+networkx
+pydot
+tree-sitter-language-pack
+
+pathspec
+git+https://github.com/paul-gauthier/grep-ast.git
