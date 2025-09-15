@@ -57,7 +57,7 @@ class TestTreesitter(unittest.TestCase):
 
         for i, block in enumerate(blocks):
             self.assertEqual(block.type, expected_types[i])
-            actual_text = block.text.decode('utf-8').strip()
+            actual_text = block.text.decode('utf-8').strip().replace('\\n', '\n')
             expected_text = expected_texts[i].strip()
             if actual_text != expected_text:
                 print(f"Mismatch in block {i+1}:")
@@ -82,7 +82,7 @@ class TestTreesitter(unittest.TestCase):
             "import sys",
             "import asyncio",
             'GLOBAL_VAR = "Hello"',
-            '''def decorator(func): 
+            '''def decorator(func):
     def wrapper(*args, **kwargs):
         print("Decorator before call")
         result = func(*args, **kwargs)
@@ -177,6 +177,68 @@ def my_function(a, b):
             expected_text = expected_texts[i].strip()
             if actual_text != expected_text:
                 print(f"Mismatch in block {i+1}:")
+                print(f"Expected: {repr(expected_text)}")
+                print(f"Actual:   {repr(actual_text)}")
+            self.assertEqual(actual_text, expected_text)
+
+
+    def test_c_header_parser(self):
+        """Tests the C parser with file3.h."""
+        c_header_file = self.test_repo_path / 'file3.h'
+        parser = Treesitter.create_treesitter(Language.C)
+        with open(c_header_file, 'rb') as f:
+            content = f.read()
+        
+        parser.parse(content)
+        
+        blocks = list(parser.iterate_blocks())
+        
+        self.assertEqual(len(blocks), 11)
+        
+        expected_types = [
+            'preproc_def',
+            'preproc_include',
+            'preproc_include',
+            'preproc_def',
+            'type_definition',
+            'type_definition',
+            'declaration',
+            'struct_specifier',
+            'declaration',
+            'declaration',
+            'function_definition',
+        ]
+        expected_texts = [
+            '#define FILE3_H',
+            '#include <stdio.h>',
+            '#include <stdlib.h>',
+            '#define MAX_VALUE 100',
+            '''typedef struct {
+    int id;
+    char* name;
+} MyStruct;''',
+            '''typedef struct __attribute__((__packed__)) {
+    char c;
+    int i;
+} PackedStruct;''',
+            'extern int global_variable;',
+            '''struct test_struct {
+    char a;
+    int b;
+}''',
+            'void function1(int arg1, char *arg2);',
+            'int function2(void);',
+            '''static inline int inline_function(int x) {
+    return x * x;
+}''',
+        ]
+
+        for i, block in enumerate(blocks):
+            self.assertEqual(block.type, expected_types[i])
+            actual_text = block.text.decode('utf-8').strip()
+            expected_text = expected_texts[i].strip()
+            if actual_text != expected_text:
+                print(f"Mismatch in block {i+1} (header):")
                 print(f"Expected: {repr(expected_text)}")
                 print(f"Actual:   {repr(actual_text)}")
             self.assertEqual(actual_text, expected_text)

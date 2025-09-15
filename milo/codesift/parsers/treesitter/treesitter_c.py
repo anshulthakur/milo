@@ -20,24 +20,60 @@ class TreesitterC(Treesitter):
         
 
     def iterate_blocks(self):
-        """Iterates over the major recognizable blocks of the source tree."""
+        """
+        Iterates over the major recognizable blocks of the source tree.
+        This implementation uses a query to find all supported block types
+        and then filters them to return only the outermost, top-level blocks
+        in the order they appear in the source code.
+
+        preproc_if is deliberately omitted because it makes the parsing of the
+        rest of the header files difficult (guard preproc)
+        """
         if not self.tree:
             return
 
-        # As per design.md, these are the major blocks. We only consider
-        # top-level nodes here.
-        supported_types = {
-            "function_definition",
-            "declaration",
-            "preproc_def",
-            "preproc_function_def",
-            "preproc_include",
-            "type_definition",
-        }
+        query_string = """
+        [
+          (function_definition)
+          (declaration)
+          (preproc_def)
+          (preproc_function_def)
+          (preproc_include)
+          (type_definition)
+          (struct_specifier)
+        ] @block
+        """
+        
+        query = tree_sitter.Query(self.language, query_string)
+        cursor = tree_sitter.QueryCursor(query)
+        captures_dict = cursor.captures(self.tree.root_node)
 
-        for node in self.tree.root_node.children:
-            if node.type in supported_types:
-                yield node
+        if not captures_dict:
+            return
+
+        captured_nodes = captures_dict.get('block', [])
+        
+        # Filter out nodes that are children of other captured nodes
+        root_blocks = []
+        # Use a set for faster lookups
+        captured_nodes_set = set(captured_nodes)
+
+        for node in captured_nodes:
+            is_nested = False
+            parent = node.parent
+            while parent:
+                if parent in captured_nodes_set:
+                    is_nested = True
+                    break
+                parent = parent.parent
+            if not is_nested:
+                root_blocks.append(node)
+                
+        # Sort the blocks by their starting position in the file
+        root_blocks.sort(key=lambda n: n.start_byte)
+        
+        for block in root_blocks:
+            yield block
 
     def get_definitions(self, node_type: str) -> list[ParsedNode]:
 
