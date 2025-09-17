@@ -1,25 +1,15 @@
 import os
 import sys
 import networkx as nx
-from tree_sitter_language_pack import get_parser
+from milo.codesift.parsers.treesitter.treesitter import Treesitter
+from milo.codesift.parsers.languages import supported_languages, supported_extensions
+from milo.codesift.parsers.utils import get_programming_language, get_file_extension
 from tree_sitter import Node, Tree
 import json
 import re
 from collections import defaultdict
 import traceback
 
-C_KEYWORDS = {"if", "while", "for", "switch", "return", "unlikely"}
-PYTHON_KEYWORDS = {
-    "if",
-    "while",
-    "for",
-    "def",
-    "return",
-    "class",
-    "try",
-    "except",
-    "with",
-}
 call_dict = {}
 
 
@@ -45,61 +35,7 @@ def node_val(source_byte, node):
     return source_byte[node.start_byte : node.end_byte].decode("utf8")
 
 
-def print_identifiers(node, file_bytes):
-    """
-    Recursively traverses an abstract syntax tree (AST) to print details of identifier nodes.
-    
-    Args:
-        node: AST node object representing a syntax construct (from parser/AST library).
-        file_bytes: Source code bytes array used to extract string values from identifiers.
-    
-    Behavior:
-    - Outputs node type and value for 'identifier' nodes via node_val()
-    - Recursively processes all child nodes in the tree structure
-    - Serves as a diagnostic utility for visualizing parsed code structures
-    
-    Revisions:
-    1. Note about print_functions_c() invocation was removed since this Python function is
-       actually called by analyze_code() and process_ast() within the same module.
-    2. Clarified that node_val() is the correct helper function for value extraction.
-    3. Added detail about file_bytes parameter's role in byte-to-string conversion.
-    """
-    print(f"Node :{node} Node type: {node.type}")
-    if node.type == "identifier":
-        identifier = node_val(file_bytes, node)
-        print("identifier", ":-", identifier)
-    for child in node.children:
-        print_identifiers(child, file_bytes)
-
-
-def print_functions_c(file_bytes, tree):
-    """
-    Analyzes and prints identifier information from C language syntax trees using Tree-sitter.
-    
-    Args:
-        file_bytes (bytes): Byte representation of the source code file being parsed
-        tree: Tree-sitter syntax tree with root_node containing the AST structure
-    
-    Processing Flow:
-    1. Iterates through top-level nodes in the syntax tree
-    2. Delegates identifier extraction to print_identifiers() for each child node
-    3. Outputs metadata about identifier nodes (names, positions, etc.)
-    
-    Key Contextual Details:
-    - Specifically designed for C language syntax analysis
-    - Integrates with Tree-sitter's C grammar implementation
-    - Works as part of a code inspection toolchain with print_identifiers()
-    - Operates on raw byte data for precise character position tracking
-    
-    Note:
-    This function is typically used during AST traversal phases in code analysis tools.
-    The output format depends on implementation details of print_identifiers().
-    """
-    for child in tree.root_node.children:
-        print_identifiers(child, file_bytes)
-
-
-def guess_extension_from_shebang(file_path=None, file_content=None):
+def guess_extension_from_shebang(file_path=None, file_content=None)-> str:
     """
     Analyzes the shebang line of a script to infer its programming language extension.
     
@@ -115,11 +51,11 @@ def guess_extension_from_shebang(file_path=None, file_content=None):
         None: Exceptions are caught internally and logged via traceback.print_exc().
     
     Shebang interpreter mapping includes:
-        "python" -> ".py"
-        "perl" -> ".pl"
-        "ruby" -> ".rb"
-        "node" -> ".js"
-        "java" -> ".java"
+        "python" -> ".py",
+        "perl" -> ".pl",
+        "ruby" -> ".rb",
+        "node" -> ".js",
+        "java" -> ".java",
     
     Behavior:
     - Extracts the interpreter from the shebang line by taking the last path segment.
@@ -136,7 +72,7 @@ def guess_extension_from_shebang(file_path=None, file_content=None):
 
         print(first_line)
         if not first_line.startswith("#!"):
-            return None
+            return ''
 
         # Map common shebang patterns to programming languages
         shebang_map = {
@@ -156,11 +92,11 @@ def guess_extension_from_shebang(file_path=None, file_content=None):
             if key in interpreter.lower():
                 return extension
 
-        return None
+        return ''
 
     except Exception as e:
         traceback.print_exc()
-        return None
+        return ''
 
 
 def update_callgraph(caller, callee=None, params=None, filename=None):
@@ -188,7 +124,7 @@ def update_callgraph(caller, callee=None, params=None, filename=None):
     - Maintains unique relationships between functions
 
     The global call_dict structure contains:
-    { 
+    {
         "func_name": str, 
         "args": str, 
         "calls": [callee_keys], 
@@ -259,232 +195,6 @@ def list_source_files(root, supported_ext):
                 yield os.path.join(dirpath, fname)
 
 
-def get_function_name_from_definition(node):
-    """
-    Extracts the function name from an abstract syntax tree (AST) node representing a function definition.
-    
-    This function traverses the AST node structure to identify and return the function name. It handles cases where
-    the declarator might be wrapped in a pointer declaration (e.g., function pointers) by skipping the asterisk node.
-    The implementation assumes a specific AST node hierarchy with types like 'pointer_declarator',
-    'function_declarator', and 'identifier'.
-    
-    Parameters:
-        node: An AST node representing a function definition or declaration. Expected to conform to a C-like AST structure.
-    
-    Returns:
-        str or None: The decoded function name as a string if found, otherwise None.
-    
-    Contextual Usage:
-    - This function is typically used in AST traversal utilities for code analysis or refactoring tools.
-    - It is called by functions that process declarations in compiled language source code (e.g., C/C++ parsers).
-    - The 'identifier' node must contain a byte string requiring decoding to UTF-8.
-    
-    Note:
-    - Assumes a specific AST format where function declarators are nested under pointer declarators when present.
-    - Does not handle complex declarator chains beyond pointer/function combinations.
-    """
-    for child in node.children:
-        if child.type == "pointer_declarator":
-            child = child.children[1]  # skip the asterisk, go to the actual declarator
-        if child.type == "function_declarator":
-            for grandchild in child.children:
-                if grandchild.type == "identifier":
-                    return grandchild.text.decode()
-    return None
-
-
-def extract_c_callee(node: Node, src_bytes: bytes):
-    """
-    Extracts the callee name from a C 'call_expression' node in an AST.
-
-    This function is part of a C-specific code analysis module that processes AST nodes to extract
-    function call information. It assumes the function expression is a simple identifier (e.g., foo()),
-    but explicitly handles cases where the function might be wrapped in other node types by checking
-    the 'identifier' type explicitly.
-
-    Args:
-        node: A tree-sitter Node representing a 'call_expression' in C syntax
-        src_bytes: Raw source code bytes containing the text to extract
-
-    Returns:
-        str: Decoded callee name if the function is a simple identifier
-        None: If the function node is not an identifier or extraction fails
-
-    Note:
-        - Part of a codebase that includes C-specific AST parsing utilities like get_function_signature_c
-        - Works in conjunction with get_function_name_from_definition for full function analysis
-        - Designed to handle edge cases where function pointers or macros might be involved
-    """
-    fn_node = node.child_by_field_name("function")
-    if fn_node and fn_node.type == "identifier":
-        return src_bytes[fn_node.start_byte : fn_node.end_byte].decode().strip()
-    return None
-
-
-# Signature extractors
-def get_function_signature_c(node: Node, src_bytes: bytes):
-    """
-    Extracts C function signature components (name and parameter list) from an AST node.
-    
-    Parameters:
-        node (Node): Tree-sitter AST node representing a C function declaration
-        src_bytes (bytes): Source code bytes of the containing file (required for parameter slicing)
-    
-    Returns:
-        Tuple[Optional[str], str]: 
-            - Function name (None if not found in identifier nodes)
-            - Normalized parameter list string (empty if no parameters found)
-    
-    Processing logic:
-    1. Skips declaration specifiers (static/inline/extern modifiers)
-    2. Unwraps pointer declarators to reach base identifier
-    3. Extracts function name from 'identifier' node text
-    4. Uses byte range slicing on parameter_list nodes to capture raw signature text
-    5. Normalizes parameter spacing via whitespace regex substitution
-    
-    Typically called by C AST parsers during symbol resolution. Used in conjunction with
-    get_function_signature_cpp for cross-language signature extraction.
-    """
-    name, params = None, ""
-
-    for child in node.children:
-        # Skip storage modifiers (static, inline, extern, etc.)
-        if child.type == "declaration_specifiers":
-            continue
-
-        # Dig through pointer wrapping
-        if child.type == "pointer_declarator":
-            child = child.children[-1]
-
-        # Match function_declarator and extract relevant pieces
-        if child.type == "function_declarator":
-            for grandchild in child.children:
-                if grandchild.type == "identifier":
-                    name = grandchild.text.decode()
-                elif grandchild.type == "parameter_list":
-                    raw = src_bytes[
-                        grandchild.start_byte : grandchild.end_byte
-                    ].decode()
-                    params = re.sub(r"\s+", " ", raw).strip()
-
-    return name, params
-
-
-def default_callee_extractor(node: Node, src_bytes: bytes):
-    """
-    Extracts the callee function name from a syntax node in C-like language processing pipelines.
-
-    This fallback extractor handles function declarations in Tree-sitter parse trees for
-    C-family languages (C/C++/Objective-C) when more specific language-aware extractors
-    are unavailable. It identifies function nodes by checking for 'identifier' type children
-    under the 'function' field.
-
-    Args:
-        node (Node): Tree-sitter syntax node to analyze (typically a function declaration)
-        src_bytes (bytes): Raw source code bytes containing the function declaration
-
-    Returns:
-        str | None: Decoded function name string if valid identifier found, otherwise None
-
-    Integration Context:
-        - Used in multi-language analysis systems as a base case handler
-        - Complements language-specific extractors (e.g., Python attribute-aware handlers)
-        - Works with Tree-sitter's C family grammar structure
-
-    Tree-sitter Grammar Dependency:
-        Requires nodes to have 'function' field with 'identifier' type children,
-        per C-family language syntax rules.
-    """
-    fn_node = node.child_by_field_name("function")
-    if fn_node and fn_node.type == "identifier":
-        return src_bytes[fn_node.start_byte : fn_node.end_byte].decode().strip()
-    return None
-
-
-def extract_python_callee(node: Node, src_bytes: bytes):
-    """
-    Extracts the callee name from a Python 'call' AST node.
-    
-    Handles both simple identifiers (e.g., 'function') and attribute chains (e.g., 'obj.method').
-    Recursively processes nested attribute nodes to construct fully qualified names.
-    
-    Args:
-        node (Node): The abstract syntax tree node representing a function call.
-        src_bytes (bytes): Raw source code bytes containing the function call text.
-    
-    Returns:
-        Optional[str]: Decoded callee name as string if valid, None otherwise.
-    
-    Used in AST analysis workflows to resolve called function identifiers,
-    particularly in dependency tracking and call graph construction scenarios.
-    The implementation supports nested attributes (e.g., 'module.class.method')
-    by recursively traversing the AST node structure.
-    """
-    target = node.child_by_field_name("function")
-    if not target:
-        return None
-
-    if target.type == "identifier":
-        return src_bytes[target.start_byte : target.end_byte].decode().strip()
-
-    elif target.type == "attribute":
-        # Handle obj.method style
-        parts = []
-
-        def collect_identifiers(attr_node):
-            for child in attr_node.children:
-                if child.type == "identifier":
-                    parts.append(
-                        src_bytes[child.start_byte : child.end_byte].decode().strip()
-                    )
-                elif child.type == "attribute":
-                    collect_identifiers(child)
-
-        collect_identifiers(target)
-        return ".".join(parts) if parts else None
-
-    return None
-
-
-def get_function_signature_python(node: Node, src_bytes: bytes):
-    """
-    Extracts a Python function's name and parameter signature from an AST node.
-    
-    Args:
-        node (Node): Tree-sitter Node representing a function definition
-        src_bytes (bytes): Raw source code bytes containing the function
-    
-    Returns:
-        Tuple[str, str]: Function name and formatted parameter string
-    
-    Process:
-    1. Parses identifier child node for function name extraction
-    2. Processes parameters child node with whitespace normalization
-    3. Returns decoded name and compacted parameter signature
-    
-    Codebase Integration:
-    - Directly used by `parse_function_def` in AST analysis modules
-    - Integrates with src_bytes handling pattern seen in 14+ functions across the codebase
-    - Serves as core utility for function signature extraction in Python parser pipeline
-    
-    Example Usage:
-    >>> name, params = get_function_signature_python(func_node, source_code_bytes)
-    >>> assert name == 'example_func'
-    >>> assert params == 'arg1 arg2=42 *args **kwargs'
-    """
-    name, params = None, ""
-
-    for child in node.children:
-        if child.type == "identifier" and node.child_by_field_name("name") == child:
-            name = src_bytes[child.start_byte : child.end_byte].decode()
-
-        elif child.type == "parameters":
-            raw = src_bytes[child.start_byte : child.end_byte].decode()
-            params = re.sub(r"\s+", " ", raw).strip()
-
-    return name, params
-
-
 def extract_context_subgraph(G, center_func, depth):
     """
     Extracts a context subgraph centered on a specific node in a directed graph, including predecessors (callers) and successors (callees) up to a specified depth.
@@ -519,100 +229,12 @@ def extract_context_subgraph(G, center_func, depth):
     return G.subgraph(subgraph_nodes)
 
 
-LANGUAGE_HANDLERS = {
-    "c": {
-        "func_def_type": "function_definition",
-        "body_type": "compound_statement",
-        "call_type": "call_expression",
-        "keywords": C_KEYWORDS,
-        "signature_extractor": get_function_signature_c,
-        "callee_extractor": extract_c_callee,
-    },
-    "python": {
-        "func_def_type": "function_definition",
-        "body_type": "block",
-        "call_type": "call",
-        "keywords": PYTHON_KEYWORDS,
-        "signature_extractor": get_function_signature_python,
-        "callee_extractor": lambda node, src_bytes: extract_python_callee(
-            node, src_bytes
-        ),
-    },
-    # Add more languages here
-}
-
-
-# def extract_function_calls(tree: Tree, src_bytes: bytes, lang: str, filename: str):
-#     """
-#     Parses a single source file and extracts:
-#     - Function definitions (and registers them with full metadata)
-#     - Function calls (and tracks callee relationships)
-#     Promotes third-party calls to known definitions when resolved.
-#     """
-#     calls = []  # list of (caller, callee)
-
-#     def walk(node: Node):
-#         if lang == "c" and node.type == "function_definition":
-#             current_func, params = get_function_signature(node, src_bytes)
-#             if not current_func or current_func.strip() in C_KEYWORDS:
-#                 return  # Ignore control keywords or unnamed functions
-
-#             # Ensure it has a body (compound_statement)
-#             body = next((child for child in node.children if child.type == "compound_statement"), None)
-#             if not body:
-#                 return
-
-#             params = re.sub(r'\s+', ' ', params).strip()
-#             func_key = f"{filename}::{current_func}"
-
-#             # 🟡 Promote third-party to local definition if previously seen as 3rd-party
-#             third_party = call_dict.setdefault("third_party", {})
-#             if current_func in third_party:
-#                 print(f"🔁 Promoting 3rd-party function to local: {func_key}")
-#                 incoming = third_party[current_func].get("called_by", [])
-
-#                 call_dict[func_key] = {
-#                     'func_name': current_func,
-#                     'args': params,
-#                     'calls': [],
-#                     'defined_in': filename,
-#                     'incoming_calls': incoming
-#                 }
-#                 del third_party[current_func]
-#             else:
-#                 update_callgraph(caller=current_func, params=params, filename=filename)
-
-#             # Walk the function body to record its calls
-#             walk_func_body(body, current_func)
-#         else:
-#             for child in node.children:
-#                 walk(child)
-
-#     def walk_func_body(node: Node, current_func: str):
-#         for child in node.children:
-#             if child.type == "call_expression":
-#                 fn_node = child.child_by_field_name("function")
-#                 if fn_node and fn_node.type == "identifier":
-#                     callee = src_bytes[fn_node.start_byte:fn_node.end_byte].decode().strip()
-#                     if callee and callee.strip() not in C_KEYWORDS:
-#                         calls.append((current_func, callee))
-#                         update_callgraph(caller=current_func, callee=callee, filename=filename)
-#             walk_func_body(child, current_func)
-
-#     walk(tree.root_node)
-#     return calls
-
-
-def extract_function_calls(tree: Tree, src_bytes: bytes, lang: str, filename: str):
+def extract_function_calls(treesitter: Treesitter, filename: str):
     """
     Extracts function call relationships from an AST (Abstract Syntax Tree) for code analysis.
 
     Args:
-        tree (Tree): Root node of the AST to analyze.
-        src_bytes (bytes): Source code bytes used to extract string representations of 
-                            function names and parameters.
-        lang (str): Programming language identifier (e.g., 'python', 'javascript')
-                    determines parsing rules via LANGUAGE_HANDLERS.
+        treesitter (Treesitter): Treesitter object for the language.
         filename (str): File path context for cross-file callgraph tracking.
 
     Returns:
@@ -629,65 +251,21 @@ def extract_function_calls(tree: Tree, src_bytes: bytes, lang: str, filename: st
             "third_party" functions in call_dict
         - Recursive traversal of AST nodes to capture nested function calls
     """
-    calls = []
-    handler = LANGUAGE_HANDLERS.get(lang)
-    if not handler:
-        raise ValueError(f"Unsupported language: {lang}")
+    functions = treesitter.get_definitions("function")
 
-    def walk(node: Node):
-        if node.type == handler["func_def_type"]:
-            current_func, params = handler["signature_extractor"](node, src_bytes)
-            if not current_func or current_func.strip() in handler["keywords"]:
-                return
+    # First, register all function definitions in the file
+    for func_node in functions:
+        current_func = func_node.name
+        params = func_node.parameters
+        update_callgraph(caller=current_func, params=params, filename=filename)
 
-            body = next(
-                (
-                    child
-                    for child in node.children
-                    if child.type == handler["body_type"]
-                ),
-                None,
-            )
-            if not body:
-                return
-
-            params = re.sub(r"\s+", " ", params).strip()
-            func_key = f"{filename}::{current_func}"
-
-            third_party = call_dict.setdefault("third_party", {})
-            if current_func in third_party:
-                incoming = third_party[current_func].get("called_by", [])
-                call_dict[func_key] = {
-                    "func_name": current_func,
-                    "args": params,
-                    "calls": [],
-                    "defined_in": filename,
-                    "incoming_calls": incoming,
-                }
-                del third_party[current_func]
-            else:
-                update_callgraph(caller=current_func, params=params, filename=filename)
-
-            walk_func_body(body, current_func)
-        else:
-            for child in node.children:
-                walk(child)
-
-    def walk_func_body(node: Node, current_func: str):
-        for child in node.children:
-            if child.type == handler["call_type"]:
-                callee = handler.get("callee_extractor", default_callee_extractor)(
-                    child, src_bytes
-                )
-                if callee and callee not in handler["keywords"]:
-                    calls.append((current_func, callee))
-                    update_callgraph(
-                        caller=current_func, callee=callee, filename=filename
-                    )
-            walk_func_body(child, current_func)
-
-    walk(tree.root_node)
-    return calls
+    # Then, process all calls
+    for func_node in functions:
+        current_func = func_node.name
+        calls = treesitter.get_calls(func_node.node)
+        for call_node in calls:
+            callee = call_node.name
+            update_callgraph(caller=current_func, callee=callee, filename=filename)
 
 
 def create_repograph(root, search=None, save_path="./"):
@@ -729,32 +307,36 @@ def create_repograph(root, search=None, save_path="./"):
     - Relies on module-level call_dict for cross-file analysis
     - Integrates with extract_function_calls() and list_source_files() utilities
     """
-    ext_map = {".c": "c", ".cpp": "cpp", ".py": "python"}
-    supported_languages = [".c", ".cpp", ".py"]
 
     graph = nx.DiGraph()
     call_dict.clear()  # Reset global state
     call_dict["third_party"] = defaultdict(lambda: {"called_by": []})
 
     # 1️⃣ Parse each file and populate call_dict
-    for filepath in list_source_files(root, supported_languages):
-        extension = os.path.splitext(filepath)[-1]
+    for filepath in list_source_files(root, supported_extensions()):
+        extension = get_file_extension(filepath)
         if len(extension) == 0:
             extension = guess_extension_from_shebang(file_path=filepath)
-        if extension is not None:
-            lang = ext_map.get(extension)
-            parser = get_parser(lang)
-            rel_path = filepath.replace(root + "/", "")
-            # print(f'Parsing {rel_path}')
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                code = f.read()
-            tree = parser.parse(code.encode("utf8"))
-            try:
-                extract_function_calls(
-                    tree, code.encode("utf8"), lang, filename=rel_path
-                )
-            except:
-                print(f"Could not extract calls from {filepath}")
+        if len(extension) == 0:
+            print(f"Undetermined extension in {filepath}")
+            continue
+        lang = get_programming_language(extension)
+        if lang.value not in supported_languages():
+            print(f"Language {lang} not supported yet.")
+            continue
+        treesitter = Treesitter.create_treesitter(lang)
+        rel_path = filepath.replace(root + "/", "")
+        # print(f'Parsing {rel_path}')
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            code = f.read()
+        treesitter.parse(code.encode("utf8"))
+        try:
+            extract_function_calls(
+                treesitter,
+                filename=rel_path
+            )
+        except:
+            print(f"Could not extract calls from {filepath}")
 
     # 2️⃣ Add known function definitions to the graph
     for func_id, meta in call_dict.items():

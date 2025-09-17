@@ -31,3 +31,9 @@ def supported_languages():
     The names of languages are returned as a list of strings.
     """
     return [ lang.value for lang in [Language.PYTHON, Language.C,]]
+
+def supported_extensions():
+    """
+    Get a list of currently supported file extensions for parsing and analysis.
+    """
+    return [".py", ".c", ".h"]

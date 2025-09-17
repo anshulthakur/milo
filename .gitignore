@@ -170,3 +170,5 @@ cython_debug/
 *_bak
 *_bk
 *.log
+
+tests/tmp/test_repograph/**

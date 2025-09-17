@@ -248,3 +248,26 @@ This list can be expanded in the future to support more node types as needed.
 6.  **Remove `parse_headers_c.py`:** Once its logic is fully integrated, the old file can be removed.
 7.  **Update `TreesitterRegistry`:** Ensure the registry works with the new class structure.
 8.  **Update client code:** Any code that uses the old `parse` method will need to be updated to use the new `get_definitions` or other `get_*` methods.
+
+## 6. `repograph.py` Migration Plan
+
+The `repograph.py` and `repograph_helpers.py` files currently use the `tree_sitter` library directly. They will be updated to use the new `Treesitter` abstraction layer. This will involve the following changes:
+
+1.  **Update `create_repograph` in `repograph.py`:**
+    *   Replace `get_parser(lang)` with `Treesitter.create_treesitter(lang)`.
+    *   The call to `extract_function_calls` will be replaced with a new implementation that uses the `Treesitter` object.
+
+2.  **Replace `extract_function_calls` in `repograph.py`:**
+    *   The language-specific `LANGUAGE_HANDLERS` dictionary will be removed.
+    *   The new implementation will use `treesitter.get_definitions('function')` to identify all functions.
+    *   For each function, it will use a new method, `treesitter.get_calls(scope_node)`, to find all function calls within the body of that function.
+
+3.  **Update `fetch_source_snippet` in `repograph_helpers.py`:**
+    *   This function will be updated to use `Treesitter.create_treesitter(lang)` to parse the file.
+    *   It will then use `treesitter.get_definitions('function')` to find the specific function and extract its source code.
+    *   The `LANGUAGE_HANDLERS` in this file will also be removed.
+
+4.  **Enhance the `Treesitter` Framework:**
+    *   A new abstract method `get_calls(scope_node: tree_sitter.Node) -> list[ParsedNode]` will be added to the `Treesitter` base class. This method will be responsible for finding all function calls within a given AST node.
+    *   The `ParsedNode` class will be updated to include `parameters` for function definitions.
+    *   All language-specific `Treesitter` implementations will be updated to implement the new `get_calls` method and to extract function parameters.

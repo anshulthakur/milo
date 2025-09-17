@@ -7,7 +7,7 @@ class TreesitterC(Treesitter):
     def __init__(self):
         super().__init__(Language.C)
         self.queries = {
-            "function": "...",
+            "function": "(function_definition) @definition",
             "struct": """
                 (struct_specifier
                     name: (type_identifier) @name) @definition
@@ -76,10 +76,66 @@ class TreesitterC(Treesitter):
             yield block
 
     def get_definitions(self, node_type: str) -> list[ParsedNode]:
+        query_string = self.queries.get(node_type)
+        if not query_string or not self.tree:
+            return []
 
-        # Similar implementation to Python, but using C-specific queries
-        # and doc comment logic (usually a comment block before the definition)
-        pass
+        query = tree_sitter.Query(self.language, query_string)
+        cursor = tree_sitter.QueryCursor(query)
+        captures = cursor.captures(self.tree.root_node)
+
+        results = []
+        if "definition" in captures:
+            for node in captures["definition"]:
+                declarator = node.child_by_field_name('declarator')
+                if declarator:
+                    name_node = declarator.child_by_field_name('declarator')
+                    name = name_node.text.decode() if name_node else None
+                    parameters_node = declarator.child_by_field_name('parameters')
+                    parameters = parameters_node.text.decode() if parameters_node else None
+                else:
+                    name = None
+                    parameters = None
+
+                doc_comment = self._get_doc_comment(node)
+
+                results.append(
+                    ParsedNode(
+                        node_type=node_type,
+                        name=name,
+                        doc_comment=doc_comment,
+                        source_code=node.text.decode(),
+                        node=node,
+                        parameters=parameters,
+                    )
+                )
+        return results
+
+    def get_calls(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
+        query_string = "(call_expression) @call"
+        if not self.tree:
+            return []
+
+        query = tree_sitter.Query(self.language, query_string)
+        cursor = tree_sitter.QueryCursor(query)
+        captures = cursor.captures(scope_node)
+
+        results = []
+        if "call" in captures:
+            for node in captures["call"]:
+                fn_node = node.child_by_field_name("function")
+                if fn_node and fn_node.type == "identifier":
+                    name = fn_node.text.decode()
+                    results.append(
+                        ParsedNode(
+                            node_type="call",
+                            name=name,
+                            doc_comment=None,
+                            source_code=node.text.decode(),
+                            node=node,
+                        )
+                    )
+        return results
 
     def get_imports(self) -> list[ParsedNode]:
         # C uses #include, so this would query for preprocessor directives

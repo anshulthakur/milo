@@ -44,39 +44,70 @@ class TreesitterPython(Treesitter):
         if not query_string or not self.tree:
             return []
 
-        query = self.language.query(query_string)
-        captures = query.captures(self.tree.root_node)
+        query = tree_sitter.Query(self.language, query_string)
+        cursor = tree_sitter.QueryCursor(query)
+        captures = cursor.captures(self.tree.root_node)
 
         results = []
-        definition_nodes = {}
+        
+        if 'definition' in captures:
+            for node in captures['definition']:
+                name_node = node.child_by_field_name('name')
+                name = name_node.text.decode() if name_node else None
 
-        for node, capture_name in captures:
-            if capture_name == "definition":
-                # Use node id to group captures for the same definition
-                if node.id not in definition_nodes:
-                    definition_nodes[node.id] = {"definition_node": node}
-            if capture_name == "name":
-                 # This assumes a name is found for a definition that has already been seen
-                if node.parent.id in definition_nodes:
-                    definition_nodes[node.parent.id]["name_node"] = node
+                if name and node.type == 'function_definition':
+                    parent = node.parent
+                    while parent:
+                        if parent.type == 'class_definition':
+                            class_name_node = parent.child_by_field_name('name')
+                            if class_name_node:
+                                class_name = class_name_node.text.decode()
+                                name = f"{class_name}.{name}"
+                            break
+                        parent = parent.parent
 
-        for node_id, parts in definition_nodes.items():
-            definition_node = parts["definition_node"]
-            name_node = parts.get("name_node")
-            name = name_node.text.decode() if name_node else None
+                doc_comment = self._get_doc_comment(node)
 
-            # Logic to find doc comment for the definition_node
-            doc_comment = self._get_doc_comment(definition_node)
+                parameters_node = node.child_by_field_name("parameters")
+                parameters = parameters_node.text.decode() if parameters_node else None
 
-            results.append(
-                ParsedNode(
-                    node_type=node_type,
-                    name=name,
-                    doc_comment=doc_comment,
-                    source_code=definition_node.text.decode(),
-                    node=definition_node,
+                results.append(
+                    ParsedNode(
+                        node_type=node_type,
+                        name=name,
+                        doc_comment=doc_comment,
+                        source_code=node.text.decode(),
+                        node=node,
+                        parameters=parameters,
+                    )
                 )
-            )
+        return results
+
+    def get_calls(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
+        query_string = "(call) @call"
+        if not self.tree:
+            return []
+
+        query = tree_sitter.Query(self.language, query_string)
+        cursor = tree_sitter.QueryCursor(query)
+        captures = cursor.captures(scope_node)
+
+        results = []
+        
+        if 'call' in captures:
+            for node in captures['call']:
+                name_node = node.child_by_field_name("function")
+                name = name_node.text.decode() if name_node else None
+                if name:
+                    results.append(
+                        ParsedNode(
+                            node_type="call",
+                            name=name,
+                            doc_comment=None,
+                            source_code=node.text.decode(),
+                            node=node,
+                        )
+                    )
         return results
 
     def get_imports(self) -> list[ParsedNode]:

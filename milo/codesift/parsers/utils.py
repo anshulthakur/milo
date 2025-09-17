@@ -43,6 +43,7 @@ def get_programming_language(file_extension: str) -> Language:
         ".go": Language.GO,
         ".cpp": Language.CPP,
         ".c": Language.C,
+        ".h": Language.C,
         ".cs": Language.C_SHARP,
         ".hs": Language.HASKELL,
     }
