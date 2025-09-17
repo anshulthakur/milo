@@ -4,6 +4,8 @@ import os
 import re
 import networkx as nx
 from milo.codesift.parsers.treesitter.treesitter import Treesitter
+from milo.codesift.parsers.utils import get_file_extension, get_programming_language, guess_extension_from_shebang
+from milo.codesift.parsers import supported_languages
 from tree_sitter import Node, Tree
 
 
@@ -175,7 +177,6 @@ def get_contextual_neighbors(G, fn_id, metadata=None, depth=2, file_hint=None):
         - Resolution prefers fully qualified names (containing '::')
         - Traversal includes both direct and indirect relationships at each depth level
     """
-    print("get_contextual_neighbors")
     resolved_id = fn_id
 
     if "::" not in fn_id:  # short name
@@ -279,7 +280,6 @@ def lookaround_source_snippet(
     - Defined file path is missing or invalid
     - Function definition cannot be located in source
     """
-    print("lookaround_source_snippet")
     resolved_id = fn_id
 
     if "::" not in fn_id:  # short name
@@ -341,9 +341,6 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
     - [Language not supported] for unsupported extensions
     - [Error reading source: ...] for parsing/IO errors
     """
-    print("fetch_source_snippet")
-    ext_map = {".c": "c", ".cpp": "cpp", ".py": "python"}
-    supported_languages = [".c", ".cpp", ".py"]
     resolved_id = fn_id
 
     if "::" not in fn_id:  # short name
@@ -365,10 +362,15 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
     if not filepath or not os.path.exists(filepath):
         return f"[Source file missing: {filepath}]"
 
-    if os.path.splitext(filepath)[-1] in ext_map:
-        lang = ext_map.get(os.path.splitext(filepath)[-1])
-    else:
-        print("[Language not supported]")
+    extension = get_file_extension(filepath)
+    if len(extension) == 0:
+        extension = guess_extension_from_shebang(file_path=filepath)
+    if len(extension) == 0:
+        print(f"Undetermined extension in {filepath}")
+        return
+    lang = get_programming_language(extension)
+    if lang.value not in supported_languages():
+        print(f"Language {lang} not supported yet.")
         return
     
     treesitter = Treesitter.create_treesitter(lang)
@@ -397,6 +399,7 @@ def main():
       search: Find functions matching regex pattern across codebase
       modules: Generate module hierarchy summary
       snippet: Fetch source code implementation with configurable context lines
+      body: Fetch source code implementation (exact body)
     
     Args:
       --fn FUNCTION_ID   Target function identifier (file.c::function_name format)
@@ -410,7 +413,7 @@ def main():
     parser = argparse.ArgumentParser(description="Repository Oracle CLI")
     parser.add_argument(
         "command",
-        choices=["meta", "neighbors", "search", "modules", "snippet"],
+        choices=["meta", "neighbors", "search", "modules", "snippet", "body"],
         help="Operation to perform",
     )
     parser.add_argument("--fn", help="Function ID (e.g., file.c::function_name)")
@@ -427,14 +430,14 @@ def main():
     )
     args = parser.parse_args()
 
-    G, _ = load_repo_graph(args.json)
+    G, metadata_all = load_repo_graph(args.json)
 
     if args.command == "meta" and args.fn:
-        result = get_function_metadata(G, args.fn)
+        result = get_function_metadata(G, args.fn, metadata=metadata_all)
         print(json.dumps(result, indent=2) if result else "[Function not found]")
 
     elif args.command == "neighbors" and args.fn:
-        neighbors = get_contextual_neighbors(G, args.fn, args.depth)
+        neighbors = get_contextual_neighbors(G, args.fn, metadata=metadata_all, depth=args.depth)
         print(json.dumps(neighbors, indent=2))
 
     elif args.command == "search" and args.pattern:
@@ -446,8 +449,14 @@ def main():
         print(json.dumps(modmap, indent=2))
 
     elif args.command == "snippet" and args.fn:
+        snippet = lookaround_source_snippet(
+            args.fn, G, metadata=metadata_all, context_lines=args.context, repo_path=args.prefix
+        )
+        print(snippet)
+    
+    elif args.command == "body" and args.fn:
         snippet = fetch_source_snippet(
-            args.fn, G, context_lines=args.context, repo_path=args.prefix
+            args.fn, G, metadata=metadata_all, repo_path=args.prefix
         )
         print(snippet)
 
