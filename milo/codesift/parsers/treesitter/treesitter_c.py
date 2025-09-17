@@ -73,7 +73,13 @@ class TreesitterC(Treesitter):
         root_blocks.sort(key=lambda n: n.start_byte)
         
         for block in root_blocks:
-            yield block
+            yield ParsedNode(
+                node_type=block.type,
+                name=None,  # Add name extraction logic if needed
+                doc_comment=self.get_docstring(block),
+                source_code=block.text.decode(),
+                node=block,
+            )
 
     def get_definitions(self, node_type: str) -> list[ParsedNode]:
         query_string = self.queries.get(node_type)
@@ -97,7 +103,7 @@ class TreesitterC(Treesitter):
                     name = None
                     parameters = None
 
-                doc_comment = self._get_doc_comment(node)
+                doc_comment = self.get_docstring(node)
 
                 results.append(
                     ParsedNode(
@@ -141,7 +147,7 @@ class TreesitterC(Treesitter):
         # C uses #include, so this would query for preprocessor directives
         pass
 
-    def _get_doc_comment(self, node: tree_sitter.Node) -> "str | None":
+    def get_docstring(self, node: tree_sitter.Node) -> "str | None":
         # Logic to find an adjacent preceding comment block.
         # This will be adapted from parse_headers_c.py
         if node.prev_named_sibling and node.prev_named_sibling.type == "comment":

@@ -56,8 +56,8 @@ class TestTreesitter(unittest.TestCase):
         ]
 
         for i, block in enumerate(blocks):
-            self.assertEqual(block.type, expected_types[i])
-            actual_text = block.text.decode('utf-8').strip().replace('\\n', '\n')
+            self.assertEqual(block.node_type, expected_types[i])
+            actual_text = block.source_code.strip().replace('\\n', '\n')
             expected_text = expected_texts[i].strip()
             if actual_text != expected_text:
                 print(f"Mismatch in block {i+1}:")
@@ -76,6 +76,19 @@ class TestTreesitter(unittest.TestCase):
         blocks = list(parser.iterate_blocks())
         
         self.assertEqual(len(blocks), 10)
+
+        expected_types = [
+            "import_statement",
+            "import_statement",
+            "import_statement",
+            "expression_statement",
+            "function_definition",
+            "class_definition",
+            "decorated_definition",
+            "function_definition",
+            "function_definition",
+            "if_statement",
+        ]
 
         expected_texts = [
             "import os",
@@ -117,7 +130,8 @@ def my_function(a, b):
         ]
 
         for i, block in enumerate(blocks):
-            actual_text = block.text.decode('utf-8').strip()
+            self.assertEqual(block.node_type, expected_types[i])
+            actual_text = block.source_code.strip()
             expected_text = expected_texts[i].strip()
             if actual_text != expected_text:
                 print(f"Mismatch in block {i+1}:")
@@ -137,6 +151,16 @@ def my_function(a, b):
         blocks = list(parser.iterate_blocks())
         
         self.assertEqual(len(blocks), 7)
+
+        expected_types = [
+            "import_from_statement",
+            "expression_statement",
+            "class_definition",
+            "function_definition",
+            "expression_statement",
+            "function_definition",
+            "if_statement",
+        ]
 
         expected_texts = [
             "from collections import namedtuple",
@@ -173,7 +197,8 @@ def my_function(a, b):
         ]
 
         for i, block in enumerate(blocks):
-            actual_text = block.text.decode('utf-8').strip()
+            self.assertEqual(block.node_type, expected_types[i])
+            actual_text = block.source_code.strip()
             expected_text = expected_texts[i].strip()
             if actual_text != expected_text:
                 print(f"Mismatch in block {i+1}:")
@@ -234,8 +259,8 @@ def my_function(a, b):
         ]
 
         for i, block in enumerate(blocks):
-            self.assertEqual(block.type, expected_types[i])
-            actual_text = block.text.decode('utf-8').strip()
+            self.assertEqual(block.node_type, expected_types[i])
+            actual_text = block.source_code.strip()
             expected_text = expected_texts[i].strip()
             if actual_text != expected_text:
                 print(f"Mismatch in block {i+1} (header):")

@@ -37,7 +37,13 @@ class TreesitterPython(Treesitter):
 
         for node in self.tree.root_node.children:
             if node.type in supported_types:
-                yield node
+                yield ParsedNode(
+                    node_type=node.type,
+                    name=None,  # Add name extraction logic if needed
+                    doc_comment=self.get_docstring(node),
+                    source_code=node.text.decode(),
+                    node=node,
+                )
 
     def get_definitions(self, node_type: str) -> list[ParsedNode]:
         query_string = self.queries.get(node_type)
@@ -66,7 +72,7 @@ class TreesitterPython(Treesitter):
                             break
                         parent = parent.parent
 
-                doc_comment = self._get_doc_comment(node)
+                doc_comment = self.get_docstring(node)
 
                 parameters_node = node.child_by_field_name("parameters")
                 parameters = parameters_node.text.decode() if parameters_node else None
@@ -114,7 +120,7 @@ class TreesitterPython(Treesitter):
         # Implementation for get_imports
         pass
 
-    def _get_doc_comment(self, node: tree_sitter.Node) -> "str | None":
+    def get_docstring(self, node: tree_sitter.Node) -> "str | None":
         # Language-specific logic to extract doc comments
         # For python, it's the first statement in the body if it's a string
         if node.type in ("function_definition", "class_definition"):

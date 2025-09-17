@@ -337,6 +337,7 @@ def create_repograph(root, search=None, save_path="./"):
             )
         except:
             print(f"Could not extract calls from {filepath}")
+            traceback.print_exc()
 
     # 2️⃣ Add known function definitions to the graph
     for func_id, meta in call_dict.items():

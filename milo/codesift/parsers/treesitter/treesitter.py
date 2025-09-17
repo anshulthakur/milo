@@ -51,6 +51,11 @@ class Treesitter(ABC):
         pass
 
     @abstractmethod
+    def get_docstring(self, node: tree_sitter.Node) -> "str | None":
+        """Gets the docstring for a given node."""
+        pass
+
+    @abstractmethod
     def get_imports(self) -> list[ParsedNode]:
         """Gets all import statements from the parsed tree."""
         pass

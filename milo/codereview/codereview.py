@@ -382,7 +382,7 @@ def review_path(repo_root, paths: list[str], repo_name = None) -> list[str]:
     # Generate a repograph of the repository
     repomap_path = os.path.join(repo_root, '.milo')
     Path(repomap_path).mkdir(exist_ok=True)
-    create_repograph(root = repo_root,
+    create_repograph(root = str(repo_root),
                      save_path=repomap_path)
     
     # Filter list by excluding patterns from .gitignore
