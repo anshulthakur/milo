@@ -407,8 +407,9 @@ class CallFlowAnalyzer:
         """
         entry_points = []
         for node, in_degree in self.graph.in_degree():
-            if in_degree == 0:
-                node_attributes = self.graph.nodes[node]
+            node_attributes = self.graph.nodes[node]
+            is_dynamic_entry = node_attributes.get('is_dynamic_entry_point', False)
+            if in_degree == 0 or is_dynamic_entry:
                 # A valid entry point must be defined within the repo, which means it has
                 # a 'defined_in' attribute that is not 'external'.
                 if node_attributes.get('defined_in') and node_attributes.get('defined_in') != 'external':

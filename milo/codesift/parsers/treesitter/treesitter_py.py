@@ -133,5 +133,8 @@ class TreesitterPython(Treesitter):
                         return child.text.decode()
         return None
 
+    def get_dynamic_entry_points(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
+        return []
+
 # Register the class
 TreesitterRegistry.register_treesitter(Language.PYTHON, TreesitterPython)

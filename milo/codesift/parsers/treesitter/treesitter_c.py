@@ -17,7 +17,10 @@ class TreesitterC(Treesitter):
                     declarator: (type_identifier) @name) @definition
             """
         }
-        
+        self.DISPATCHER_REGISTRY = {
+            "pthread_create": 2,  # 3rd argument (0-indexed)
+            "signal": 1,          # 2nd argument
+        }
 
     def iterate_blocks(self):
         """
@@ -153,6 +156,45 @@ class TreesitterC(Treesitter):
         if node.prev_named_sibling and node.prev_named_sibling.type == "comment":
             return node.prev_named_sibling.text.decode()
         return None
+
+    def get_dynamic_entry_points(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
+        query_string = "(call_expression) @call"
+        if not self.tree:
+            return []
+
+        query = tree_sitter.Query(self.language, query_string)
+        cursor = tree_sitter.QueryCursor(query)
+        captures = cursor.captures(scope_node)
+
+        results = []
+        if "call" in captures:
+            for node in captures["call"]:
+                fn_node = node.child_by_field_name("function")
+                if not (fn_node and fn_node.type == "identifier"):
+                    continue
+                
+                function_name = fn_node.text.decode()
+                if function_name not in self.DISPATCHER_REGISTRY:
+                    continue
+
+                arg_index = self.DISPATCHER_REGISTRY[function_name]
+                args_node = node.child_by_field_name("arguments")
+                if not args_node or args_node.named_child_count <= arg_index:
+                    continue
+
+                callback_node = args_node.named_children[arg_index]
+                if callback_node.type == 'identifier':
+                    callback_name = callback_node.text.decode()
+                    results.append(
+                        ParsedNode(
+                            node_type="dynamic_entry_point",
+                            name=callback_name,
+                            doc_comment=None,
+                            source_code=callback_node.text.decode(),
+                            node=callback_node,
+                        )
+                    )
+        return results
 
 # Register the class
 TreesitterRegistry.register_treesitter(Language.C, TreesitterC)

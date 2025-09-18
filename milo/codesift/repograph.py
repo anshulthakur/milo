@@ -127,7 +127,7 @@ def update_callgraph(caller, callee=None, params=None, filename=None):
     {
         "func_name": str, 
         "args": str, 
-        "calls": [callee_keys], 
+        "calls": [callee_keys],
         "defined_in": str, 
     }
 
@@ -259,13 +259,21 @@ def extract_function_calls(treesitter: Treesitter, filename: str):
         params = func_node.parameters
         update_callgraph(caller=current_func, params=params, filename=filename)
 
-    # Then, process all calls
+    # Then, process all calls and dynamic entry points
     for func_node in functions:
         current_func = func_node.name
         calls = treesitter.get_calls(func_node.node)
         for call_node in calls:
             callee = call_node.name
             update_callgraph(caller=current_func, callee=callee, filename=filename)
+
+        dynamic_entries = treesitter.get_dynamic_entry_points(func_node.node)
+        for entry in dynamic_entries:
+            # Assume the dynamic entry point is defined in the same file.
+            entry_point_name = f"{filename}::{entry.name}"
+            if entry_point_name not in call_dict:
+                update_callgraph(caller=entry.name, filename=filename)
+            call_dict[entry_point_name]["is_dynamic_entry_point"] = True
 
 
 def create_repograph(root, search=None, save_path="./"):
@@ -311,6 +319,7 @@ def create_repograph(root, search=None, save_path="./"):
     graph = nx.DiGraph()
     call_dict.clear()  # Reset global state
     call_dict["third_party"] = defaultdict(lambda: {"called_by": []})
+    call_dict["dynamic_entry_points"] = []
 
     # 1️⃣ Parse each file and populate call_dict
     for filepath in list_source_files(root, supported_extensions()):
@@ -341,7 +350,7 @@ def create_repograph(root, search=None, save_path="./"):
 
     # 2️⃣ Add known function definitions to the graph
     for func_id, meta in call_dict.items():
-        if func_id == "third_party":
+        if func_id in ["third_party", "dynamic_entry_points"]:
             continue
         graph.add_node(func_id, label=func_id.split("::")[-1], **meta)
         for callee_key in meta.get("calls", []):
@@ -366,7 +375,7 @@ def create_repograph(root, search=None, save_path="./"):
 
     # 4️⃣ Annotate additional metadata for defined functions
     for func_id, meta in call_dict.items():
-        if func_id == "third_party":
+        if func_id in ["third_party", "dynamic_entry_points"]:
             continue
 
         file = meta.get("defined_in", "").lower()
@@ -424,7 +433,7 @@ def create_repograph(root, search=None, save_path="./"):
     lookup = defaultdict(list)
 
     for fn_id, meta in call_dict.items():
-        if fn_id == "third_party":
+        if fn_id in ["third_party", "dynamic_entry_points"]:
             continue
         shortname = fn_id.split("::")[-1]
         defined_mappings[fn_id] = meta

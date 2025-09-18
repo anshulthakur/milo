@@ -41,11 +41,16 @@ class TestCallFlowAnalyzer(unittest.TestCase):
             'file1.py::generator_function',
             'subdir/file6.py::AnotherClass.__init__',
             'subdir/file6.py::AnotherClass.__repr__',
-            'subdir/file6.py::main'
+            'subdir/file6.py::main',
+            'file5.c::thread_function'
         ]
         
         self.assertCountEqual(entry_points, expected_entry_points)
 
+    def test_find_dynamic_entry_points(self):
+        """Test that dynamic entry points (e.g., from pthread_create) are found."""
+        entry_points = self.analyzer.find_entry_points()
+        self.assertIn('file5.c::thread_function', entry_points)
     def test_get_all_call_flows(self):
         """Test getting all call flows from all entry points."""
         all_flows = self.analyzer.get_all_call_flows()

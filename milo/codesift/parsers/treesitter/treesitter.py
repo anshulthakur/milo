@@ -24,6 +24,8 @@ class ParsedNode:
         self.parameters = parameters
 
 class Treesitter(ABC):
+    DISPATCHER_REGISTRY = {}
+
     def __init__(self, language: Language):
         self.parser = get_parser(language.value)
         self.language = get_language(language.value)
@@ -63,6 +65,11 @@ class Treesitter(ABC):
     @abstractmethod
     def get_calls(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
         """Gets all call expressions from a given scope."""
+        pass
+
+    @abstractmethod
+    def get_dynamic_entry_points(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
+        """Gets all functions registered as dynamic entry points (e.g., callbacks)."""
         pass
 
     # Other common queries can be added here as abstract methods.
