@@ -3,7 +3,7 @@ import os
 import json
 from pathlib import Path
 from milo.codesift.repograph import create_repograph
-from milo.codesift.repograph_helpers import load_repo_graph, get_contextual_neighbors, fetch_source_snippet
+from milo.codesift.repobrowser import load_repo_graph, get_contextual_neighbors, fetch_source_snippet
 
 class TestRepograph(unittest.TestCase):
 

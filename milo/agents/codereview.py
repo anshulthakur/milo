@@ -9,9 +9,9 @@ from milo.agents.tools import (
     GrepContext,
 )
 
-from milo.codesift.repograph_helpers import load_repo_graph
-from milo.codesift.repograph_helpers import get_function_metadata
-from milo.codesift.repograph_helpers import fetch_source_snippet, get_contextual_neighbors, lookaround_source_snippet
+from milo.codesift.repobrowser import load_repo_graph
+from milo.codesift.repobrowser import get_function_metadata
+from milo.codesift.repobrowser import fetch_source_snippet, get_contextual_neighbors, lookaround_source_snippet
 from milo.codesift.grepast import grep_ast
 from pydantic import BaseModel, TypeAdapter
 from enum import Enum

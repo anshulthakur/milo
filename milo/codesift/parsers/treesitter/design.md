@@ -251,7 +251,7 @@ This list can be expanded in the future to support more node types as needed.
 
 ## 6. `repograph.py` Migration Plan
 
-The `repograph.py` and `repograph_helpers.py` files currently use the `tree_sitter` library directly. They will be updated to use the new `Treesitter` abstraction layer. This will involve the following changes:
+The `repograph.py` and `repobrowser.py` files currently use the `tree_sitter` library directly. They will be updated to use the new `Treesitter` abstraction layer. This will involve the following changes:
 
 1.  **Update `create_repograph` in `repograph.py`:**
     *   Replace `get_parser(lang)` with `Treesitter.create_treesitter(lang)`.
@@ -262,7 +262,7 @@ The `repograph.py` and `repograph_helpers.py` files currently use the `tree_sitt
     *   The new implementation will use `treesitter.get_definitions('function')` to identify all functions.
     *   For each function, it will use a new method, `treesitter.get_calls(scope_node)`, to find all function calls within the body of that function.
 
-3.  **Update `fetch_source_snippet` in `repograph_helpers.py`:**
+3.  **Update `fetch_source_snippet` in `repobrowser.py`:**
     *   This function will be updated to use `Treesitter.create_treesitter(lang)` to parse the file.
     *   It will then use `treesitter.get_definitions('function')` to find the specific function and extract its source code.
     *   The `LANGUAGE_HANDLERS` in this file will also be removed.

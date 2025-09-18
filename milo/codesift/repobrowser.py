@@ -244,7 +244,7 @@ def summarize_module_hierarchy(G):
                 Functions without a 'defined_in' attribute are grouped under '<unknown>'.
 
     Notes:
-        - This utility is used by the main() function in repograph_helpers to analyze module-level organization.
+        - This utility is used by the main() function in repobrowser to analyze module-level organization.
         - Function IDs correspond to node identifiers in the graph (typically formatted as 'module::function').
     """
     from collections import defaultdict
@@ -387,6 +387,61 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
 
     except Exception as e:
         return f"[Error reading source: {str(e)}]"
+
+
+from typing import Dict, List
+
+class CallFlowAnalyzer:
+    """
+    Analyzes a RepoGraph to find and trace call flows.
+    """
+
+    def __init__(self, repo_graph: nx.DiGraph):
+        self.graph = repo_graph
+
+    def find_entry_points(self) -> list:
+        """
+        Finds all potential entry points in the graph.
+        An entry point is a function defined within the repository that has no incoming calls
+        from other functions within the repository. It filters out external dependencies.
+        """
+        entry_points = []
+        for node, in_degree in self.graph.in_degree():
+            if in_degree == 0:
+                node_attributes = self.graph.nodes[node]
+                # A valid entry point must be defined within the repo, which means it has
+                # a 'defined_in' attribute that is not 'external'.
+                if node_attributes.get('defined_in') and node_attributes.get('defined_in') != 'external':
+                    entry_points.append(node)
+        return entry_points
+
+    def get_call_flow(self, start_node) -> List[list]:
+        """
+        Traces all possible call paths starting from a given node.
+        """
+        # Find all terminal nodes in the graph
+        terminal_nodes = [n for n, d in self.graph.out_degree() if d == 0]
+
+        paths = []
+        for end_node in terminal_nodes:
+            # Find all simple paths from the start_node to the end_node
+            # This inherently handles cycles by only visiting nodes once per path.
+            try:
+                for path in nx.all_simple_paths(self.graph, source=start_node, target=end_node):
+                    paths.append(path)
+            except nx.NetworkXNoPath:
+                continue
+        return paths
+
+    def get_all_call_flows(self) -> Dict[object, List[list]]:
+        """
+        Finds all entry points and gets the call flows for each one.
+        """
+        entry_points = self.find_entry_points()
+        all_flows = {}
+        for entry in entry_points:
+            all_flows[entry] = self.get_call_flow(entry)
+        return all_flows
 
 
 def main():

@@ -16,7 +16,7 @@ from collections import defaultdict
 
 from git import Repo, GitCommandError
 from milo.codesift.repograph import create_repograph
-from milo.codesift.repograph_helpers import load_repo_graph
+from milo.codesift.repobrowser import load_repo_graph
 from milo.agents.codereview import get_agent as get_codereview_agent
 from milo.codesift.parsers.utils import (get_file_extension, get_programming_language, guess_extension_from_shebang)
 from milo.codesift.parsers import supported_languages, Treesitter
