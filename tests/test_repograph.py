@@ -1,6 +1,7 @@
 import unittest
 import os
 import json
+import shutil
 from pathlib import Path
 from milo.codesift.repograph import create_repograph
 from milo.codesift.repobrowser import load_repo_graph, get_contextual_neighbors, fetch_source_snippet
@@ -14,6 +15,11 @@ class TestRepograph(unittest.TestCase):
         cls.save_path.mkdir(exist_ok=True)
         create_repograph(str(cls.test_repo_path), save_path=str(cls.save_path))
         cls.G, cls.metadata = load_repo_graph(str(cls.save_path / "metadata.json"))
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(cls.save_path):
+            shutil.rmtree(cls.save_path)
 
     def test_create_repograph_for_c(self):
         # C assertions

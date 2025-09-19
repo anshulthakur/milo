@@ -15,6 +15,7 @@ class TestCodeReview(unittest.TestCase):
             str(self.test_repo_path / 'file1.py'),
             str(self.test_repo_path / 'file2.c'),
             str(self.test_repo_path / 'file3.h'),
+            str(self.test_repo_path / 'file5.c'),
             str(self.test_repo_path / 'subdir' / 'file6.py'),
         ]
         self.assertCountEqual(file_list, expected_files)

@@ -84,7 +84,7 @@ def load_repo_graph(json_path="metadata.json"):
     with open(json_path, "r") as f:
         metadata_all = json.load(f)
 
-    print(f"Loaded metadata from {json_path}")
+    #print(f"Loaded metadata from {json_path}")
     lookup = metadata_all.get("lookup", {})
     defined = metadata_all.get("defined_mappings", {})
     third_party = metadata_all.get("third_party_mappings", {})

@@ -5,8 +5,6 @@ from pathlib import Path
 
 from unidiff import PatchSet
 
-
-
 from typing import Optional
 from enum import Enum
 import hashlib
@@ -390,52 +388,53 @@ def review_path(repo_root, paths: list[str], repo_name = None) -> list[str]:
     #Invoke the master Code Review Agent
     agent = get_codereview_agent(metadata_path=os.path.join(repomap_path, "metadata.json"), repo_path=repo_root, repo_name=repo_name)
 
-    for local_path in files_to_review:
-        # Guess the programming language
-        file_extension = get_file_extension(local_path)
-        if len(file_extension) == 0:
-            file_extension = guess_extension_from_shebang(file_path=local_path)
-        programming_language = get_programming_language(file_extension)
+    # for local_path in files_to_review:
+    #     # Guess the programming language
+    #     file_extension = get_file_extension(local_path)
+    #     if len(file_extension) == 0:
+    #         file_extension = guess_extension_from_shebang(file_path=local_path)
+    #     programming_language = get_programming_language(file_extension)
 
-        if programming_language.value not in supported_languages():
-            print("Language parsing currently not supported")
-            continue
+    #     if programming_language.value not in supported_languages():
+    #         print("Language parsing currently not supported")
+    #         continue
         
-        file_content = None
-        try:
-            print(f"Processing {local_path}")
-            with open(local_path, "r") as file:
-                # Read the entire content of the file into a string
-                file_content = file.read().encode()
+    #     file_content = None
+    #     try:
+    #         print(f"Processing {local_path}")
+    #         with open(local_path, "r") as file:
+    #             # Read the entire content of the file into a string
+    #             file_content = file.read().encode()
 
-                # Parse the file using treesitter, and extract the elements from the code
-                treesitter_parser = Treesitter.create_treesitter(programming_language)
-                treesitter_nodes = treesitter_parser.parse(file_content)
+    #             # Parse the file using treesitter, and extract the elements from the code
+    #             treesitter_parser = Treesitter.create_treesitter(programming_language)
+    #             #treesitter_nodes = treesitter_parser.parse(file_content)
+    #             treesitter_parser.parse(file_content)
+    #             treesitter_nodes = treesitter_parser.iterate_blocks()
+    #             for node in treesitter_nodes:
+    #                 method_name = node.name
+    #                 method_comment = None
 
-                for node in treesitter_nodes:
-                    method_name = node.name
-                    method_comment = None
-
-                    method_source_code = node.method_source_code
-                    if node.doc_comment and node.doc_comment not in node.method_source_code:
-                        method_comment = node.doc_comment
-                    try:
-                        # Invoke the agent to do a code review and collect the review to a JSON file
-                        user_prompt = InputCode(language = programming_language.value, 
-                                                method=method_source_code, 
-                                                docstring = method_comment or "")
-                        agent.clear_history()
-                        response = agent.call(user_prompt.model_dump_json())
-                        response_json = json.loads(response)
-                        reviews = ReviewListModel.validate_python(
-                                    response_json if isinstance(response_json, list) else []
-                                )
-                        print(reviews)
-                    except:
-                        print("Error processing node. Skip")
-                        traceback.print_exc()
-        except FileNotFoundError:
-            print(f"{local_path} No longer exists.")
+    #                 method_source_code = node.method_source_code
+    #                 if node.doc_comment and node.doc_comment not in node.method_source_code:
+    #                     method_comment = node.doc_comment
+    #                 try:
+    #                     # Invoke the agent to do a code review and collect the review to a JSON file
+    #                     user_prompt = InputCode(language = programming_language.value, 
+    #                                             method=method_source_code, 
+    #                                             docstring = method_comment or "")
+    #                     agent.clear_history()
+    #                     response = agent.call(user_prompt.model_dump_json())
+    #                     response_json = json.loads(response)
+    #                     reviews = ReviewListModel.validate_python(
+    #                                 response_json if isinstance(response_json, list) else []
+    #                             )
+    #                     print(reviews)
+    #                 except:
+    #                     print("Error processing node. Skip")
+    #                     traceback.print_exc()
+    #     except FileNotFoundError:
+    #         print(f"{local_path} No longer exists.")
 
     return sorted(list(files_to_review))
 
