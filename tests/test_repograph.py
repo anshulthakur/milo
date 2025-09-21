@@ -18,9 +18,10 @@ class TestRepograph(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if os.path.exists(cls.save_path):
-            shutil.rmtree(cls.save_path)
-
+        # if os.path.exists(cls.save_path):
+        #     shutil.rmtree(cls.save_path)
+        pass
+    
     def test_create_repograph_for_c(self):
         # C assertions
         self.assertIn("file2.c::function1", self.metadata["defined_mappings"])
@@ -28,6 +29,27 @@ class TestRepograph(unittest.TestCase):
         self.assertIn("file2.c::main", self.metadata["defined_mappings"])
         self.assertEqual(self.metadata["defined_mappings"]["file2.c::main"]["calls"], ["file2.c::function1", "file2.c::function2"])
         self.assertEqual(self.metadata["defined_mappings"]["file2.c::function2"]["calls"], ["file3.h::inline_function"])
+
+    def test_repograph_dynamic_calls(self):
+        self.assertIn('file8.c::my_callback_handler', self.metadata["defined_mappings"])
+        self.assertIn('file8.c::another_callback', self.metadata["defined_mappings"])
+        self.assertIn('file8.c::register_callback', self.metadata["defined_mappings"])
+        self.assertIn('file8.c::main', self.metadata["defined_mappings"])
+
+        main_calls = self.metadata["defined_mappings"]['file8.c::main']['calls']
+        self.assertIn('file8.c::register_callback', main_calls)
+
+        register_calls = self.metadata["defined_mappings"]['file8.c::register_callback']['calls']
+        self.assertIn('file8.c::my_callback_handler', register_calls)
+        self.assertIn('file8.c::another_callback', register_calls)
+
+        self.assertTrue(self.metadata["defined_mappings"]['file8.c::my_callback_handler']['is_dynamic_entry_point'])
+        self.assertTrue(self.metadata["defined_mappings"]['file8.c::another_callback']['is_dynamic_entry_point'])
+
+        # Assertions for file5.c
+        self.assertIn('file5.c::thread_function', self.metadata["defined_mappings"])
+        self.assertTrue(self.metadata["defined_mappings"]['file5.c::thread_function']['is_dynamic_entry_point'])
+
 
     def test_create_repograph_for_python(self):
         # Python assertions

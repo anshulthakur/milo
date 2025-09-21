@@ -98,12 +98,26 @@ class TreesitterC(Treesitter):
             for node in captures["definition"]:
                 declarator = node.child_by_field_name('declarator')
                 if declarator:
-                    name_node = declarator.child_by_field_name('declarator')
+                    name_and_params_declarator = declarator
+                    if declarator.type == 'pointer_declarator':
+                        name_and_params_declarator = declarator.child_by_field_name('declarator')
+
+                    if name_and_params_declarator:
+                        name_node = name_and_params_declarator.child_by_field_name('declarator')
+                        parameters_node = name_and_params_declarator.child_by_field_name('parameters')
+                    else:
+                        name_node = None
+                        parameters_node = None
+
                     name = name_node.text.decode() if name_node else None
-                    parameters_node = declarator.child_by_field_name('parameters')
                     parameters = parameters_node.text.decode() if parameters_node else None
+                    
+                    if not name and declarator.type == 'type_identifier':
+                        name = declarator.text.decode()
+
                 else:
-                    name = None
+                    name_node = node.child_by_field_name('name')
+                    name = name_node.text.decode() if name_node else None
                     parameters = None
 
                 doc_comment = self.get_docstring(node)
@@ -158,7 +172,55 @@ class TreesitterC(Treesitter):
         return None
 
     def get_dynamic_entry_points(self, scope_node: tree_sitter.Node) -> list[ParsedNode]:
-        query_string = "(call_expression) @call"
+        local_symbols_query_str = """
+        [
+          (parameter_declaration
+            declarator: [ (identifier) @id (pointer_declarator declarator: (identifier) @id) ]
+          )
+          (declaration
+            (init_declarator
+              declarator: [ (identifier) @id (pointer_declarator declarator: (identifier) @id) ]
+            )
+          )
+          (declaration
+            declarator: [ (identifier) @id (pointer_declarator declarator: (identifier) @id) ]
+          )
+        ]
+        """
+        results = []
+        local_symbols = set()
+        local_symbols_query = tree_sitter.Query(self.language, local_symbols_query_str)
+        cursor = tree_sitter.QueryCursor(local_symbols_query)
+        capture_results = cursor.captures(scope_node)
+        if "id" not in capture_results:
+            return results
+        for node in capture_results["id"]:
+            local_symbols.add(node.text.decode())
+
+        query_string = """
+        [
+          (call_expression
+            arguments: (argument_list
+              [
+                (identifier) @callback_arg
+                (pointer_expression argument: (identifier) @callback_arg)
+              ]
+            )
+          )
+          (initializer_list
+            [
+              (identifier) @callback_arg
+              (pointer_expression argument: (identifier) @callback_arg)
+            ]
+          )
+          (assignment_expression
+            right: [
+              (identifier) @callback_arg
+              (pointer_expression argument: (identifier) @callback_arg)
+            ]
+          )
+        ]
+        """
         if not self.tree:
             return []
 
@@ -166,32 +228,19 @@ class TreesitterC(Treesitter):
         cursor = tree_sitter.QueryCursor(query)
         captures = cursor.captures(scope_node)
 
-        results = []
-        if "call" in captures:
-            for node in captures["call"]:
-                fn_node = node.child_by_field_name("function")
-                if not (fn_node and fn_node.type == "identifier"):
-                    continue
-                
-                function_name = fn_node.text.decode()
-                if function_name not in self.DISPATCHER_REGISTRY:
-                    continue
-
-                arg_index = self.DISPATCHER_REGISTRY[function_name]
-                args_node = node.child_by_field_name("arguments")
-                if not args_node or args_node.named_child_count <= arg_index:
-                    continue
-
-                callback_node = args_node.named_children[arg_index]
-                if callback_node.type == 'identifier':
-                    callback_name = callback_node.text.decode()
+        
+        captured = captures.get('callback_arg')
+        if captured:
+            for node in captured:
+                callback_name = node.text.decode()
+                if callback_name not in local_symbols:
                     results.append(
                         ParsedNode(
-                            node_type="dynamic_entry_point",
+                            node_type="dynamic_entry_point_candidate",
                             name=callback_name,
                             doc_comment=None,
-                            source_code=callback_node.text.decode(),
-                            node=callback_node,
+                            source_code=node.text.decode(),
+                            node=node,
                         )
                     )
         return results

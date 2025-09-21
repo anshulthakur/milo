@@ -269,12 +269,63 @@ def extract_function_calls(treesitter: Treesitter, filename: str):
 
         dynamic_entries = treesitter.get_dynamic_entry_points(func_node.node)
         for entry in dynamic_entries:
-            # Assume the dynamic entry point is defined in the same file.
-            entry_point_name = f"{filename}::{entry.name}"
-            if entry_point_name not in call_dict:
-                update_callgraph(caller=entry.name, filename=filename)
-            call_dict[entry_point_name]["is_dynamic_entry_point"] = True
+            candidate_name = entry.name
+            
+            call_expr_node = entry.node
+            while call_expr_node and call_expr_node.type != 'call_expression':
+                call_expr_node = call_expr_node.parent
 
+            if call_expr_node:
+                function_id_node = call_expr_node.child_by_field_name('function')
+                if function_id_node:
+                    dynamic_caller_name = function_id_node.text.decode()
+                    caller_key = f"{filename}::{dynamic_caller_name}"
+                    call_dict['dynamic_entry_point_candidates'].append((caller_key, candidate_name))
+
+def resolve_dynamic_entry_points(call_dict):
+    candidates = call_dict.pop('dynamic_entry_point_candidates', [])
+    if not candidates:
+        return
+
+    # Build a lookup from short name to full key(s)
+    name_to_key_map = defaultdict(list)
+    for k in call_dict:
+        if '::' in k:
+            name_to_key_map[k.split('::')[-1]].append(k)
+
+    for caller_key, candidate_name in candidates:
+        possible_callees = name_to_key_map.get(candidate_name, [])
+        
+        if not possible_callees:
+            # Not a function defined in the repo. Could be a third-party one.
+            update_callgraph(caller=caller_key.split('::')[-1], callee=candidate_name, filename=caller_key.split('::')[0])
+            continue
+
+        # Try to find a callee in the same file as the caller
+        caller_filename = caller_key.split('::')[0]
+        callee_in_same_file = None
+        for key in possible_callees:
+            if key.startswith(caller_filename + '::'):
+                callee_in_same_file = key
+                break
+        
+        resolved_callee_key = callee_in_same_file
+        if not resolved_callee_key and len(possible_callees) == 1:
+            # Unambiguous, even if in another file
+            resolved_callee_key = possible_callees[0]
+            
+        if resolved_callee_key:
+            # Add edge
+            if caller_key in call_dict and resolved_callee_key not in call_dict[caller_key]['calls']:
+                call_dict[caller_key]['calls'].append(resolved_callee_key)
+            
+            # Mark as dynamic entry point
+            if resolved_callee_key in call_dict:
+                call_dict[resolved_callee_key]['is_dynamic_entry_point'] = True
+        else:
+            # Ambiguous case. For now, do nothing.
+            print(f"Ambiguous dynamic call to '{candidate_name}' from '{caller_key}'. Candidates: {possible_callees}")
+            pass
 
 def create_repograph(root, search=None, save_path="./"):
     """
@@ -319,7 +370,7 @@ def create_repograph(root, search=None, save_path="./"):
     graph = nx.DiGraph()
     call_dict.clear()  # Reset global state
     call_dict["third_party"] = defaultdict(lambda: {"called_by": []})
-    call_dict["dynamic_entry_points"] = []
+    call_dict["dynamic_entry_point_candidates"] = []
 
     # 1️⃣ Parse each file and populate call_dict
     for filepath in list_source_files(root, supported_extensions()):
@@ -347,6 +398,8 @@ def create_repograph(root, search=None, save_path="./"):
         except:
             print(f"Could not extract calls from {filepath}")
             traceback.print_exc()
+
+    resolve_dynamic_entry_points(call_dict)
 
     # 2️⃣ Add known function definitions to the graph
     for func_id, meta in call_dict.items():

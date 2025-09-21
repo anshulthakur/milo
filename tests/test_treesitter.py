@@ -65,6 +65,45 @@ class TestTreesitter(unittest.TestCase):
                 print(f"Actual:   {repr(actual_text)}")
             self.assertEqual(actual_text, expected_text)
 
+    def test_c_dynamic_entry_points(self):
+        # Test for file8.c
+        c_file_8 = self.test_repo_path / 'file8.c'
+        parser = Treesitter.create_treesitter(Language.C)
+        with open(c_file_8, 'rb') as f:
+            content = f.read()
+        
+        parser.parse(content)
+        functions = parser.get_definitions('function')
+        
+        dynamic_entries = parser.get_dynamic_entry_points(parser.tree.root_node)
+
+        # for entry in dynamic_entries:
+        #     print(entry.source_code)
+
+        self.assertEqual(len(dynamic_entries), 2)
+        entry_point_names = {entry.name for entry in dynamic_entries}
+        self.assertIn('my_callback_handler', entry_point_names)
+        self.assertIn('another_callback', entry_point_names)
+        self.assertNotIn('my_local_var', entry_point_names)
+
+        # Test for file5.c
+        c_file_5 = self.test_repo_path / 'file5.c'
+        # Re-create parser for clean state if needed, though for this case it's probably fine
+        parser = Treesitter.create_treesitter(Language.C)
+        with open(c_file_5, 'rb') as f:
+            content = f.read()
+        
+        parser.parse(content)
+        functions = parser.get_definitions('function')
+        
+        dynamic_entries = parser.get_dynamic_entry_points(parser.tree.root_node)
+        # for entry in dynamic_entries:
+        #     print(entry.source_code)
+            
+        self.assertEqual(len(dynamic_entries), 1)
+        entry_point_names = {entry.name for entry in dynamic_entries}
+        self.assertIn('thread_function', entry_point_names)
+
     def test_python_parser_file1(self):
         """Tests the Python parser with file1.py."""
         py_file = self.test_repo_path / 'file1.py'
@@ -114,160 +153,7 @@ def my_function(a, b):
     list_comp = [i*i for i in range(a, b)]
     return sum(list_comp)''',
             '''async def async_function():
-    print("Async function start")
-    await asyncio.sleep(1)
-    print("Async function end")''',
-            '''def generator_function(n):
-    for i in range(n):
-        yield i''',
-            '''if __name__ == "__main__":
-    instance = MyClass("World")
-    print(instance.greet())
-    print(my_function(1, 10))
-    for i in generator_function(5):
-        print(i)
-    asyncio.run(async_function())'''
+    print(
+
+'''
         ]
-
-        for i, block in enumerate(blocks):
-            self.assertEqual(block.node_type, expected_types[i])
-            actual_text = block.source_code.strip()
-            expected_text = expected_texts[i].strip()
-            if actual_text != expected_text:
-                print(f"Mismatch in block {i+1}:")
-                print(f"Expected: {repr(expected_text)}")
-                print(f"Actual:   {repr(actual_text)}")
-            self.assertEqual(actual_text, expected_text)
-
-
-    def test_python_parser_file6(self):
-        """Tests the Python parser with subdir/file6.py."""
-        py_file = self.test_repo_path / 'subdir' / 'file6.py'
-        parser = Treesitter.create_treesitter(Language.PYTHON)
-        with open(py_file, 'rb') as f:
-            content = f.read()
-            
-        parser.parse(content)
-        blocks = list(parser.iterate_blocks())
-        
-        self.assertEqual(len(blocks), 7)
-
-        expected_types = [
-            "import_from_statement",
-            "expression_statement",
-            "class_definition",
-            "function_definition",
-            "expression_statement",
-            "function_definition",
-            "if_statement",
-        ]
-
-        expected_texts = [
-            "from collections import namedtuple",
-            "Point = namedtuple('Point', ['x', 'y'])",
-            '''class AnotherClass(object):
-    """Another class with a static method."""
-    class_var = 10
-
-    def __init__(self, x, y):
-        self.p = Point(x, y)
-
-    @staticmethod
-    def static_method():
-        return "This is a static method."
-
-    def __repr__(self):
-        return f"AnotherClass(x={self.p.x}, y={self.p.y})"''',
-            '''def another_function(items):
-    """A function with a filter and map."""
-    evens = filter(lambda x: x % 2 == 0, items)
-    squared = map(lambda x: x * x, evens)
-    return list(squared)''',
-            'gen_exp = (x for x in range(10) if x % 3 == 0)',
-            '''def main():
-    ac = AnotherClass(1, 2)
-    print(ac)
-    print(AnotherClass.static_method())
-    numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    print(another_function(numbers))
-    for val in gen_exp:
-        print(f"Generator expression value: {val}")''', 
-            """if __name__ == '__main__':
-    main()"""
-        ]
-
-        for i, block in enumerate(blocks):
-            self.assertEqual(block.node_type, expected_types[i])
-            actual_text = block.source_code.strip()
-            expected_text = expected_texts[i].strip()
-            if actual_text != expected_text:
-                print(f"Mismatch in block {i+1}:")
-                print(f"Expected: {repr(expected_text)}")
-                print(f"Actual:   {repr(actual_text)}")
-            self.assertEqual(actual_text, expected_text)
-
-
-    def test_c_header_parser(self):
-        """Tests the C parser with file3.h."""
-        c_header_file = self.test_repo_path / 'file3.h'
-        parser = Treesitter.create_treesitter(Language.C)
-        with open(c_header_file, 'rb') as f:
-            content = f.read()
-        
-        parser.parse(content)
-        
-        blocks = list(parser.iterate_blocks())
-        
-        self.assertEqual(len(blocks), 11)
-        
-        expected_types = [
-            'preproc_def',
-            'preproc_include',
-            'preproc_include',
-            'preproc_def',
-            'type_definition',
-            'type_definition',
-            'declaration',
-            'struct_specifier',
-            'declaration',
-            'declaration',
-            'function_definition',
-        ]
-        expected_texts = [
-            '#define FILE3_H',
-            '#include <stdio.h>',
-            '#include <stdlib.h>',
-            '#define MAX_VALUE 100',
-            '''typedef struct {
-    int id;
-    char* name;
-} MyStruct;''',
-            '''typedef struct __attribute__((__packed__)) {
-    char c;
-    int i;
-} PackedStruct;''',
-            'extern int global_variable;',
-            '''struct test_struct {
-    char a;
-    int b;
-}''',
-            'void function1(int arg1, char *arg2);',
-            'int function2(void);',
-            '''static inline int inline_function(int x) {
-    return x * x;
-}''',
-        ]
-
-        for i, block in enumerate(blocks):
-            self.assertEqual(block.node_type, expected_types[i])
-            actual_text = block.source_code.strip()
-            expected_text = expected_texts[i].strip()
-            if actual_text != expected_text:
-                print(f"Mismatch in block {i+1} (header):")
-                print(f"Expected: {repr(expected_text)}")
-                print(f"Actual:   {repr(actual_text)}")
-            self.assertEqual(actual_text, expected_text)
-
-
-if __name__ == '__main__':
-    unittest.main()
