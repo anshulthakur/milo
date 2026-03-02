@@ -67,7 +67,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
             num_predict: 4096
             repeat_penalty: 1.05
     
-    The agent follows a structured review workflow defined in the SYSTEM_PROMPT, returning JSON arrays
+    The agent follows a structured review workflow defined in its Model file, returning JSON arrays
     of issues with type, file path, line number, description, and suggested fixes. Outputs strictly adhere
     to the specified schema without additional commentary.
     """
@@ -125,34 +125,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
                 ),
             ),
         ]
-        SYSTEM_PROMPT = """You are an expert code reviewer.
-Your task is to analyze diffs in source code and return **structured JSON feedback**.
-Each diff line is prefixed with its actual line number in the source file (for `-` lines) or in the updated file (for `+` lines). 
-Use this line number when reporting issues. Additionally, you may suggest refactoring or relevance based improvements in the entire code (not just the diff).
-
-You are allowed to use tools to gather:
-- Source code for the changed function
-- Metadata (role, callees, file path)
-- Neighboring functions in the call graph
-
-Your final output MUST be a **JSON array** of issues using this format:
-
-[
-  {
-    "type": "bug" | "performance" | "style" | "best_practice",
-    "file": "<filepath>",
-    "line": <line number of issue in the new version>,
-    "description": "<what is wrong>",
-    "suggestion": "<what to do instead>"
-  },
-  ...
-]
-
-Guidelines:
-- Only reference added lines (+) in the diff.
-- If there are no issues, return `[]`.
-- Return valid JSON only — no extra commentary.
-"""
+        
         code_review_agent = Agent(
             name="CodeReviewOrchestrator",
             tools=tools,

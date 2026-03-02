@@ -1,4 +1,4 @@
-# Machine in the Loop for Developers (MiLo-Dy)
+# Machine in the Loop (MiLo)
 
 A library of tools to help access LLM and AI tools for productivity.
 
