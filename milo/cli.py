@@ -5,9 +5,13 @@ from milo.codereview import review_path
 from milo.utils.git_tools import get_git_root, get_changed_files
 from milo.utils.path_utils import get_all_files
 
-def run_comb_agent(file_path):
+from milo.agents.comb import COMB
+
+def run_comb(files):
     """Placeholder for running the COMB agent on a file."""
-    print(f"Running COMB agent on: {file_path}")
+    print(f"Running COMB agent on: {files}")
+    comb = COMB()
+    comb.run(files)
 
 def create_update_repo_map(git_root):
     """Placeholder for creating/updating the repo map."""
@@ -64,8 +68,7 @@ def comb_main():
         print("No files found to process.")
     else:
         print(f"Found {len(files_to_document)} files to process.")
-        for file_path in files_to_document:
-            run_comb_agent(file_path)
+        run_comb(files_to_document)
 
 def codesift_main():
     parser = argparse.ArgumentParser(description='Codesift: Terminal-based chat interface.')
