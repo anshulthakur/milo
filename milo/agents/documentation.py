@@ -1,0 +1,79 @@
+
+from milo.codesift.repobrowser import load_repo_graph
+from milo.codesift.repobrowser import get_function_metadata
+from milo.codesift.repobrowser import fetch_source_snippet, get_contextual_neighbors, lookaround_source_snippet
+from milo.codesift.grepast import grep_ast
+
+from milo.agents.baseagent import Agent
+from milo.agents.tools import (
+    build_tool,
+    FetchSourceArgs,
+    LookaroundSourceArgs,
+    GetMetadataArgs,
+    GetNeighborsArgs,
+    GrepContext,
+)
+
+comb_agent = None
+
+def get_agent(metadata_path=None, repo_path=None, repo_name=None):
+    global comb_agent
+    if not comb_agent:
+        G, metadata = load_repo_graph(json_path=metadata_path)
+        tools = [
+            build_tool(
+                "fetch_source_snippet",
+                "Fetch the source code implementation of a function from the repo.",
+                FetchSourceArgs,
+                lambda fn_name: fetch_source_snippet(fn_id = fn_name, 
+                                                     G=G, 
+                                                     metadata = metadata,
+                                                     repo_path=repo_path),
+            ),
+            build_tool(
+                "get_function_metadata",
+                "Retrieve structured metadata (like callers, callees, arguments, and file path) for a function.",
+                GetMetadataArgs,
+                lambda fn_name: get_function_metadata(G=G, fn_id=fn_name, metadata = metadata, ),
+            ),
+            build_tool(
+                "get_contextual_neighbors",
+                "Find functions that are callers or callees within a given depth from a function.",
+                GetNeighborsArgs,
+                lambda fn_name, depth=2: get_contextual_neighbors(G=G, fn_id=fn_name, depth=depth, metadata = metadata, ),
+            ),
+            build_tool(
+                "lookaround_source_snippet",
+                "Fetch the source code around a function definition from the repo graph.",
+                LookaroundSourceArgs,
+                lambda fn_name, context_lines=30: lookaround_source_snippet(fn_id = fn_name, 
+                                                                      G=G, 
+                                                                      metadata = metadata, 
+                                                                      context_lines=context_lines,
+                                                                      repo_path=repo_path),
+            ),
+            build_tool(
+                "grep_keyword",
+                "Fetches various instances where keyword is used across the codebase in a grep-like manner",
+                GrepContext,
+                lambda query, filename=None: grep_ast(query = query,
+                                                    file_hint = filename,
+                                                    repo_path=repo_path),
+            ),
+        ]
+        
+        comb_agent = Agent(
+            name="DocumentationAgent",
+            tools=tools,
+            options={
+                "num_predict": 4096,
+                "temperature": 0.6,
+                "top_p": 0.95,
+                "repeat_last_n": 64,
+                "repeat_penalty": 1.05,
+                "seed": 0,
+                "top_k": 20,
+                "min_p": 0.0,
+            },
+        )
+    return comb_agent

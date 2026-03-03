@@ -10,6 +10,7 @@ milo is a code intelligence platform that analyzes code changes and builds depen
 - **Key Classes**:
   - `BaseAgent`: Foundation for all agents
   - `CodeReviewAgent`: Handles code review tasks
+  - `CodeDocumentationAgent`: Handles the generation and updates to in-code documentation
 
 ### Code Review Library
 - **Purpose**: Analyze Git changes and detect defects
@@ -23,6 +24,12 @@ milo is a code intelligence platform that analyzes code changes and builds depen
   - **Parsers**: Language-specific AST parsers (Python, C, Java, etc.)
   - **Repograph**: Build function call graphs
   - **Repobrowser**: Visualize and navigate code structure
+
+
+### Code Documentation Library
+- **Purpose**: Goes through the code and adds/updates documentation to it
+- **Key Functions**:
+
 
 ## Workflow
 1. Code is parsed into ASTs using Treesitter

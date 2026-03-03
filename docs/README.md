@@ -8,6 +8,7 @@ This directory contains documentation for the milo code analysis platform. The d
 - [Agents](agents.md)
 - [Code Review](codereview.md)
 - [CodeSift](codesift.md)
+- [Code Documentation](documentor.md)
 ```
 
 ```markdown docs/architecture.md

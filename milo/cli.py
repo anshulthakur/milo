@@ -5,17 +5,7 @@ from milo.codereview import review_path
 from milo.utils.git_tools import get_git_root, get_changed_files
 from milo.utils.path_utils import get_all_files
 
-from milo.agents.comb import COMB
-
-def run_comb(files):
-    """Placeholder for running the COMB agent on a file."""
-    print(f"Running COMB agent on: {files}")
-    comb = COMB()
-    comb.run(files)
-
-def create_update_repo_map(git_root):
-    """Placeholder for creating/updating the repo map."""
-    print(f"Creating/Updating repo map for: {git_root}")
+from milo.documentation.documentation import run_comb
 
 def crab_main():
     parser = argparse.ArgumentParser(description='Comment Review and Aggregation Bot (CRAB)')
@@ -49,11 +39,11 @@ def comb_main():
         sys.exit(1)
 
     git_root = get_git_root(target_path)
+    repo_name = git_root.split('/')[-1] if git_root is not None else None
     files_to_document = []
 
     if git_root:
         print(f"Git repository detected at: {git_root}")
-        create_update_repo_map(git_root)
         if args.updates:
             print(f"Looking for updates in {target_path}...")
             files_to_document = get_changed_files(git_root, target_path)
@@ -68,7 +58,9 @@ def comb_main():
         print("No files found to process.")
     else:
         print(f"Found {len(files_to_document)} files to process.")
-        run_comb(files_to_document)
+        run_comb(repo_root=git_root,
+                 repo_name=repo_name,
+                 files = files_to_document)
 
 def codesift_main():
     parser = argparse.ArgumentParser(description='Codesift: Terminal-based chat interface.')

@@ -153,7 +153,30 @@ def my_function(a, b):
     list_comp = [i*i for i in range(a, b)]
     return sum(list_comp)''',
             '''async def async_function():
-    print(
+    print("Async function start")
+    await asyncio.sleep(1)
+    print("Async function end")''',
 
-'''
+            '''def generator_function(n):
+    for i in range(n):
+        yield i''',
+        
+        '''if __name__ == "__main__":
+    instance = MyClass("World")
+    print(instance.greet())
+    print(my_function(1, 10))
+    for i in generator_function(5):
+        print(i)
+    asyncio.run(async_function())'''
         ]
+
+        for i, block in enumerate(blocks):
+            self.assertEqual(block.node_type, expected_types[i])
+            actual_text = block.source_code.strip().replace('\\n', '\n')
+            expected_text = expected_texts[i].strip()
+            if actual_text != expected_text:
+                print(f"Mismatch in block {i+1}:")
+                print(f"Expected: {repr(expected_text)}")
+                print(f"Actual:   {repr(actual_text)}")
+            self.assertEqual(actual_text, expected_text)
+
