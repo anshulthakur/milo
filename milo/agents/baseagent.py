@@ -8,7 +8,7 @@ from openai import OpenAI
 from milo.agents.tools import Tool
 
 LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://localhost:11434/v1")
-LLM_MODEL = os.environ.get('LLM_MODEL', "qwen3:8b")
+LLM_MODEL = os.environ.get('LLM_MODEL', "comb")
 
 
 class Agent:
@@ -72,6 +72,9 @@ class Agent:
         Resets the agent's conversation history to an empty list.
         """
         self.history = []
+
+    def set_format(self, format):
+        self.format = format
 
     def call(self, followup: str = None) -> Any:
         """

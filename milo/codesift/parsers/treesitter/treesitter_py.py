@@ -2,6 +2,7 @@ from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter.treesitter import Treesitter, ParsedNode
 from milo.codesift.parsers.treesitter.treesitter_registry import TreesitterRegistry
 import tree_sitter
+from typing import List, Optional
 
 class TreesitterPython(Treesitter):
     def __init__(self):
@@ -36,10 +37,11 @@ class TreesitterPython(Treesitter):
         }
 
         for node in self.tree.root_node.children:
+            name_node = node.child_by_field_name("name")
             if node.type in supported_types:
                 yield ParsedNode(
                     node_type=node.type,
-                    name=None,  # Add name extraction logic if needed
+                    name=name_node.text.decode("utf-8") if name_node else None,
                     doc_comment=self.get_docstring(node),
                     source_code=node.text.decode(),
                     node=node,

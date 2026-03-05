@@ -2,6 +2,7 @@ from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter.treesitter import Treesitter, ParsedNode
 from milo.codesift.parsers.treesitter.treesitter_registry import TreesitterRegistry
 import tree_sitter
+from typing import List, Optional
 
 class TreesitterC(Treesitter):
     def __init__(self):
@@ -21,6 +22,20 @@ class TreesitterC(Treesitter):
             "pthread_create": 2,  # 3rd argument (0-indexed)
             "signal": 1,          # 2nd argument
         }
+
+    def _extract_node_name(self, node) -> Optional[str]:
+        declarator = node.child_by_field_name("declarator")
+        while declarator:
+            if declarator.type == "identifier":
+                return declarator.text.decode("utf-8")
+            
+            # Handle pointer_declarator, function_declarator, etc.
+            next_decl = declarator.child_by_field_name("declarator")
+            if next_decl:
+                declarator = next_decl
+            else:
+                break
+        return None
 
     def iterate_blocks(self):
         """
@@ -78,7 +93,7 @@ class TreesitterC(Treesitter):
         for block in root_blocks:
             yield ParsedNode(
                 node_type=block.type,
-                name=None,  # Add name extraction logic if needed
+                name=self._extract_node_name(block),  # Add name extraction logic if needed
                 doc_comment=self.get_docstring(block),
                 source_code=block.text.decode(),
                 node=block,
