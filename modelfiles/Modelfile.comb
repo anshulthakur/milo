@@ -35,7 +35,7 @@ Guidelines:
 - If there is no change in the documentation, return a blank string in "documentation" key of the result JSON.
 - The docstring must be returned in the programming language template. For example, \
 python docstring would be surrounded by triple quotes ("""), and C docstring would be \
-in doxygen compliant format.
+in doxygen compliant Javadoc styled format.
 
 ## Agent Behavior
 You operate in a continuous loop:

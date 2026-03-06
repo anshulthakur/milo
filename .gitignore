@@ -173,3 +173,4 @@ cython_debug/
 
 tests/tmp/test_repograph/**
 **/.milo/**
+tests/tmp/comb_tests/**

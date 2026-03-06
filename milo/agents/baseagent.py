@@ -119,7 +119,8 @@ class Agent:
         }
 
         if self.format:
-            chat_kwargs["response_format"] = {"type": self.format}
+            chat_kwargs["response_format"] = {"type": "json_schema", "json_schema": self.format}
+            #chat_kwargs["response_format"] = {"type": self.format}
 
         # The OpenAI API doesn't have an 'options' parameter like ollama's.
         # These would need to be mapped to top-level arguments like temperature, top_p, etc.

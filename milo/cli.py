@@ -53,6 +53,9 @@ def comb_main():
     else:
         print(f"No git repository detected. Processing path: {target_path}")
         files_to_document = get_all_files(target_path)
+        if os.path.isdir(target_path):
+            git_root = target_path
+            repo_name = os.path.basename(target_path)
 
     if not files_to_document:
         print("No files found to process.")

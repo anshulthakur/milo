@@ -122,15 +122,18 @@ def insert_docstring_python(file_content: str, tree, method_node, docstring: str
     if is_quoted:
         docstring_lines = docstring.splitlines()
         docstring_block = ""
-        for line in docstring_lines:
-             docstring_block += f"{indent}{line}\n"
+        for i, line in enumerate(docstring_lines):
+             if i == 0:
+                 docstring_block += f"{line}\n"
+             else:
+                 docstring_block += f"{indent}{line}\n"
         docstring_block += indent
     else:
         docstring_lines = docstring.splitlines()
         if len(docstring_lines) == 1:
-            docstring_block = f'{indent}"""{docstring_lines[0].strip()}"""\n{indent}'
+            docstring_block = f'"""{docstring_lines[0].strip()}"""\n{indent}'
         else:
-            docstring_block = f'{indent}"""\n'
+            docstring_block = f'"""\n'
             for line in docstring_lines:
                 docstring_block += f'{indent}{line}\n'
             docstring_block += f'{indent}"""\n{indent}'
@@ -332,11 +335,19 @@ def run_comb(repo_root = None, repo_name = None, files: List[str] = []):
         Path(repomap_path).mkdir(exist_ok=True)
         create_repograph(root = str(repo_root),
                         save_path=repomap_path)
+    else:
+        #Create a repo_root in /tmp/ to have a repomap, keep it unhidden
+        repomap_path = os.path.join('/tmp', 'milo')
+        Path(repomap_path).mkdir(exist_ok=True)
     
     metadata_path = os.path.join(repomap_path, "metadata.json") if repomap_path is not None else None
     agent = get_documentation_agent(metadata_path=metadata_path, repo_path=repo_root, repo_name=repo_name)
 
     for local_path in files_to_document:
+        if not repo_root:
+            #Individual files passed for documentation. Create repograph for each 
+            create_repograph(root = os.path.dirname(local_path),
+                            save_path=repomap_path)
         # Guess the programming language
         file_extension = get_file_extension(local_path)
         if len(file_extension) == 0:
@@ -358,8 +369,8 @@ def run_comb(repo_root = None, repo_name = None, files: List[str] = []):
                     method_name = node.name
                     method_comment = None
 
-                    method_source_code = node.method_source_code
-                    if node.doc_comment and node.doc_comment not in node.method_source_code:
+                    method_source_code = node.source_code
+                    if node.doc_comment and node.doc_comment not in node.source_code:
                         method_comment = node.doc_comment
                     try:
                         user_prompt = InputCode(language = programming_language.value, 
@@ -367,6 +378,7 @@ def run_comb(repo_root = None, repo_name = None, files: List[str] = []):
                                     docstring = method_comment or "")
             
                         agent.clear_history()
+                        agent.set_format(CommentedCode.model_json_schema())
                         response = agent.call(user_prompt.model_dump_json())
                         
                         comment = CommentedCode.model_validate_json(response)
