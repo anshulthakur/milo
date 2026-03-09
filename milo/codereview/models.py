@@ -19,3 +19,11 @@ class CodeReview(BaseModel):
 
 ReviewList: TypeAlias = list[CodeReview]
 ReviewListModel = TypeAdapter(ReviewList)
+
+class InputCode(BaseModel):
+    language: str
+    method: str
+    docstring: str = ""
+    request: str = ("Please revise the docstring for the provided method. "
+                    "Return the result in JSON format using the schema provided. "
+                    "Use tools to fetch further context from the repository graph to ensure documentation relevance. ")

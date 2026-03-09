@@ -1,1 +1,1 @@
-from .codereview import review_path
+from .codereview import run_crab

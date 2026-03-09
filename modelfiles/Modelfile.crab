@@ -1,5 +1,5 @@
-FROM qwen3:4b-instruct-2507-q8_0
-#FROM qwen3:4b-thinking-2507-q8_0
+#FROM qwen3:4b-instruct-2507-q8_0
+FROM qwen3:4b-thinking-2507-q8_0
 
 SYSTEM """
 You are CRAB, a Code Review Assistant Bot. You are an expert code reviewer and analyzer.

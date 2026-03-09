@@ -21,6 +21,12 @@ class TreesitterPython(Treesitter):
             """
         }
 
+    def _extract_node_name(self, node) -> Optional[str]:
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            return name_node.text.decode("utf-8")
+        return None
+
     def iterate_blocks(self):
         """Iterates over the major recognizable blocks of the source tree."""
         if not self.tree:
@@ -37,11 +43,10 @@ class TreesitterPython(Treesitter):
         }
 
         for node in self.tree.root_node.children:
-            name_node = node.child_by_field_name("name")
             if node.type in supported_types:
                 yield ParsedNode(
                     node_type=node.type,
-                    name=name_node.text.decode("utf-8") if name_node else None,
+                    name=self._extract_node_name(node),
                     doc_comment=self.get_docstring(node),
                     source_code=node.text.decode(),
                     node=node,
