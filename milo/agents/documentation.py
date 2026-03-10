@@ -65,6 +65,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
         comb_agent = Agent(
             name="DocumentationAgent",
             tools=tools,
+            model="comb",
             options={
                 "num_predict": 4096,
                 "temperature": 0.6,
