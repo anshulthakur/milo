@@ -1,4 +1,5 @@
 import hashlib
+import os
 from typing import List, Optional
 from abc import ABC, abstractmethod
 from git import Repo, GitCommandError
@@ -35,13 +36,26 @@ class LocalGitProvider(VCSProvider):
 
     def get_changes(self, base_ref: str, head_ref: str) -> PatchSet:
         try:
-            diff_text = self.repo.git.diff(
-                base_ref, 
-                head_ref, 
-                ignore_blank_lines=True, 
-                ignore_space_at_eol=True,
-                unified=3
-            )
+            if head_ref == 'index':
+                diff_text = self.repo.git.diff(
+                    base_ref,
+                    '--cached',
+                    '--src-prefix=a/',
+                    '--dst-prefix=b/',
+                    ignore_blank_lines=True,
+                    ignore_space_at_eol=True,
+                    unified=3
+                )
+            else:
+                diff_text = self.repo.git.diff(
+                    base_ref,
+                    head_ref,
+                    '--src-prefix=a/',
+                    '--dst-prefix=b/',
+                    ignore_blank_lines=True,
+                    ignore_space_at_eol=True,
+                    unified=3
+                )
             return PatchSet(diff_text)
         except GitCommandError as e:
             print(f"Git error extracting diff: {e}")
@@ -49,8 +63,18 @@ class LocalGitProvider(VCSProvider):
 
     def get_file_content(self, file_path: str, ref: str) -> Optional[str]:
         try:
-            return self.repo.git.show(f"{ref}:{file_path}")
-        except GitCommandError:
+            if os.path.isabs(file_path):
+                file_path = os.path.relpath(file_path, self.repo.working_dir)
+
+            if ref == 'index':
+                ref_spec = f":0:{file_path}"
+            else:
+                ref_spec = f"{ref}:{file_path}"
+            
+            # GitPython strips trailing newlines by default. We must explicitly disable this.
+            return self.repo.git.show(ref_spec, strip_newline_in_stdout=False)
+
+        except (GitCommandError, KeyError):
             return None
 
     def get_current_rev(self) -> str:

@@ -12,7 +12,7 @@ from milo.codereview.models import InputCode, ReviewListModel
 from milo.codereview.diff import VCSProvider, DiffUtils
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 
-def run_crab(vcs: Optional[VCSProvider] = None, repo_root: Optional[str] = None, files: List[str] = []) -> None:
+def run_crab(vcs: Optional[VCSProvider] = None, repo_root: Optional[str] = None, files: List[str] = None, review_staged: bool = False) -> None:
     """
     Main entry point for CRAB (Comment Review and Aggregation Bot).
     Orchestrates the review process using VCS, State Store, and Agents.
@@ -23,6 +23,9 @@ def run_crab(vcs: Optional[VCSProvider] = None, repo_root: Optional[str] = None,
     elif not repo_root:
         # Fallback for standalone mode
         repo_root = os.getcwd()
+
+    if files is None:
+        files = []
 
     # 1. Initialize State Store
     repomap_path = None
@@ -45,12 +48,17 @@ def run_crab(vcs: Optional[VCSProvider] = None, repo_root: Optional[str] = None,
 
     # 4. Determine Changes to Review
     if vcs:
-        # Scenario B: Git Repository Review
-        # We assume we are reviewing changes between HEAD and its parent (or a base branch)
-        # For simplicity, let's diff against HEAD~1 if not specified
-        # In a real CI env, these would be arguments.
-        head_rev = vcs.get_current_rev()
-        base_rev = f"{head_rev}~1" # Default to previous commit
+        if review_staged:
+            # Scenario C: Review staged changes against HEAD
+            base_rev = vcs.get_current_rev()
+            head_rev = 'index'
+        else:
+            # Scenario B: Git Repository Review (committed changes)
+            # We assume we are reviewing changes between HEAD and its parent (or a base branch)
+            # For simplicity, let's diff against HEAD~1 if not specified
+            # In a real CI env, these would be arguments.
+            head_rev = vcs.get_current_rev()
+            base_rev = f"{head_rev}~1" # Default to previous commit
         
         patch_set = vcs.get_changes(base_rev, head_rev)
         
