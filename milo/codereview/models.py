@@ -20,6 +20,13 @@ class CodeReview(BaseModel):
 ReviewList: TypeAlias = list[CodeReview]
 ReviewListModel = TypeAdapter(ReviewList)
 
+class ReviewInputCode(BaseModel):
+    language: str
+    method: str
+    file_path: Optional[str] = None
+    diff_hunk: Optional[str] = None
+    request: str
+
 class InputCode(BaseModel):
     language: str
     method: str

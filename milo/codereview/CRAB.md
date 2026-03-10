@@ -175,7 +175,7 @@ Used when running within a Git repo, CI/CD pipeline, or processing a Pull Reques
 
 5. **Agent Execution**:
     Prompt includes:
-    *   The Diff (Hunk).
+    *   The Unified Diff Hunk (with explicit line numbers for accurate reporting).
     *   The Full Symbol Code (Context).
     *   Graph Context (Callers/Callees from `repograph`).
     *   History of previous comments on this symbol.

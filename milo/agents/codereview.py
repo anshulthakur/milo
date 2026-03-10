@@ -129,6 +129,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
         code_review_agent = Agent(
             name="CodeReviewOrchestrator",
             tools=tools,
+            model="crab",
             options={
                 "num_predict": 4096,
                 "temperature": 0.6,

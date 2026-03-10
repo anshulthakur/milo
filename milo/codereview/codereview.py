@@ -8,7 +8,7 @@ from milo.codesift.repograph import create_repograph, extract_function_calls
 from milo.agents.codereview import get_agent as get_codereview_agent
 from milo.codesift.parsers.utils import (get_file_extension, get_programming_language, guess_extension_from_shebang)
 from milo.codesift.parsers import supported_languages, Treesitter
-from milo.codereview.models import InputCode, ReviewListModel
+from milo.codereview.models import ReviewListModel, ReviewInputCode
 from milo.codereview.diff import VCSProvider, DiffUtils
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 
@@ -178,7 +178,8 @@ def process_file_changes(file_path, file_content, hunks, review_store, agent, re
                 review_store=review_store,
                 patch_fingerprint=patch_fingerprint,
                 ast_fingerprint=ast_fingerprint,
-                line_range=(matched_def.node.start_point[0] + 1, matched_def.node.end_point[0] + 1)
+                line_range=(matched_def.node.start_point[0] + 1, matched_def.node.end_point[0] + 1),
+                hunk=hunk
             )
 
 def process_file_symbols(file_path, file_content, review_store, agent, repo_root):
@@ -218,12 +219,27 @@ def process_file_symbols(file_path, file_content, review_store, agent, repo_root
             line_range=(definition.node.start_point[0] + 1, definition.node.end_point[0] + 1)
         )
 
-def perform_review(agent, lang, code, file_path, symbol_name, history, review_store, patch_fingerprint, ast_fingerprint, line_range):
+def perform_review(agent, lang, code, file_path, symbol_name, history, review_store, patch_fingerprint, ast_fingerprint, line_range, hunk=None):
     try:
-        user_prompt = InputCode(
+        hunk_text = DiffUtils.format_hunk_with_line_numbers(hunk) if hunk else None
+        
+        if hunk_text:
+            request = (f"You are reviewing changes in `{file_path}`. "
+                       "The `diff_hunk` field contains the unified diff of modifications with line numbers. "
+                       "The `method` field contains the full function source after applying changes. "
+                       "Focus on issues introduced by the change (lines starting with +). "
+                       "Do not comment on parts of the code that were not changed. "
+                       "Return the result in JSON format using the schema provided.")
+        else:
+            request = ("Please review the entire method source provided for potential bugs, style violations, or performance issues. "
+                       "Return the result in JSON format using the schema provided.")
+
+        user_prompt = ReviewInputCode(
             language=lang,
             method=code,
-            docstring="" # Docstring extraction can be improved
+            file_path=file_path,
+            diff_hunk=hunk_text,
+            request=request
         )
         
         # Inject history if available

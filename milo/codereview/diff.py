@@ -108,6 +108,31 @@ class DiffUtils:
         return "\n".join(content)
 
     @staticmethod
+    def format_hunk_with_line_numbers(hunk: Hunk) -> str:
+        """
+        Formats a hunk of code changes into a unified diff-style string with line numbers.
+        This is used to provide the LLM with exact line numbers for reporting issues.
+        """
+        lines = []
+        for line in hunk:
+            if line.is_added:
+                prefix = "+"
+                line_no = line.target_line_no
+            elif line.is_removed:
+                prefix = "-"
+                line_no = line.source_line_no
+            elif line.is_context:
+                prefix = " "
+                line_no = line.target_line_no or line.source_line_no
+            else:
+                prefix = " "
+                line_no = line.target_line_no or line.source_line_no or 0
+            
+            # Format: 4-digit line number, prefix, value
+            lines.append(f"{line_no if line_no else 0:4} {prefix} {line.value}")
+        return "".join(lines)
+
+    @staticmethod
     def compute_patch_fingerprint(hunk: Hunk) -> str:
         """
         Generates a SHA-256 hash of the normalized hunk.

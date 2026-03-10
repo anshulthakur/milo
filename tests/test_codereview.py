@@ -4,7 +4,7 @@ import json
 import unittest
 from git import Repo
 from pathlib import Path
-from unidiff import PatchSet
+from unidiff import PatchSet, Hunk
 from milo.codereview.diff import LocalGitProvider, DiffUtils
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 from milo.codesift.parsers import Language
@@ -94,6 +94,27 @@ index 123..456 100644
         fp2 = DiffUtils.compute_ast_fingerprint(func2)
         
         self.assertEqual(fp1, fp2, "AST fingerprint should be robust to insignificant whitespace in C")
+
+    def test_format_hunk_with_line_numbers(self):
+        """Test that hunks are formatted with correct line numbers and prefixes."""
+        diff_text = """
+diff --git a/file.py b/file.py
+index 111..222 100644
+--- a/file.py
++++ b/file.py
+@@ -10,2 +10,2 @@
+ context
+-removed
++added
+"""
+        patch = PatchSet(diff_text.strip())
+        hunk = patch[0][0]
+        
+        formatted = DiffUtils.format_hunk_with_line_numbers(hunk)
+        
+        self.assertIn("  10   context", formatted)
+        self.assertIn("  11 - removed", formatted)
+        self.assertIn("  11 + added", formatted)
 
 class TestStateManager(unittest.TestCase):
     def setUp(self):
@@ -293,6 +314,18 @@ class TestCrabIntegration(unittest.TestCase):
 
         # 4. Assertions for first run
         mock_agent_instance.call.assert_called_once()
+        
+        # Verify the payload sent to the agent
+        call_args = mock_agent_instance.call.call_args
+        self.assertIsNotNone(call_args, "Agent should have been called")
+        payload_json = call_args[0][0]
+        payload = json.loads(payload_json)
+        
+        self.assertEqual(payload.get("file_path"), "app.py")
+        self.assertIn("diff_hunk", payload)
+        self.assertIn("print('hello world') # changed", payload["diff_hunk"])
+        self.assertIn("You are reviewing changes in `app.py`", payload["request"])
+
         review_store_path = self.repo_path / ".milo" / "reviews.json"
         self.assertTrue(review_store_path.exists())
         store = ReviewStore(review_store_path)
@@ -402,6 +435,48 @@ class TestCrabIntegration(unittest.TestCase):
         self.assertEqual(len(reviews), 1)
         self.assertEqual(reviews[0].anchor.symbol_name, "main")
         self.assertIn("Staged change issue", reviews[0].conversation[0].content)
+
+    def test_run_crab_e2e_no_mocks(self):
+        """
+        Exploratory end-to-end test for run_crab without mocks.
+        This test makes a real call to the LLM and then prints the saved
+        review comments from the ReviewStore for inspection.
+        """
+        # 1. Modify a file to introduce a reviewable issue
+        self.py_file_path.write_text("def main():\n    password = '12345' # Bad practice\n    print('hello')\n")
+        self.repo.index.add(["app.py"])
+        self.repo.index.commit("Add insecure password")
+
+        # 2. Run CRAB in git mode. This will populate the review store.
+        vcs_provider = LocalGitProvider(str(self.repo_path))
+        run_crab(vcs=vcs_provider, repo_root=str(self.repo_path))
+        
+        # 3. Load the review store to inspect the saved comments
+        review_store_path = self.repo_path / ".milo" / "reviews.json"
+        self.assertTrue(review_store_path.exists(), "Review store file was not created.")
+        store = ReviewStore(review_store_path)
+        
+        reviews = list(store.reviews.values())
+
+        # 4. Print the saved reviews for the user to see
+        print("\n--- Saved Reviews from ReviewStore ---")
+        if not reviews:
+            print("No reviews found in the store.")
+        for review in reviews:
+            print(f"Review ID: {review.id}")
+            print(f"  File: {review.anchor.file_path}")
+            print(f"  Symbol: {review.anchor.symbol_name}")
+            print(f"  Status: {review.status.value}")
+            print("  Conversation:")
+            for comment in review.conversation:
+                print(f"    - {comment.role.upper()}: {comment.content.strip()}")
+            print("-" * 20)
+        print("--------------------------------------\n")
+
+        # 5. Assert that at least one review was created and saved
+        self.assertGreater(len(reviews), 0, "No reviews were saved to the store.")
+        self.assertEqual(reviews[0].anchor.symbol_name, "main")
+        self.assertGreater(len(reviews[0].conversation), 0, "The saved review has no comments.")
 
 if __name__ == '__main__':
     unittest.main()

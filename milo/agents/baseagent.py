@@ -2,12 +2,13 @@ import os
 import json
 import traceback
 from typing import List, Dict, Any
+import re
 
 # from ollama import Client
 from openai import OpenAI
 from milo.agents.tools import Tool
 
-LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://localhost:11434/v1")
+LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://srsw.cdot.in:11434/v1")
 LLM_MODEL = os.environ.get('LLM_MODEL', "comb")
 
 
@@ -20,6 +21,7 @@ class Agent:
         system_prompt="",
         format=None,
         model=LLM_MODEL,
+        endpoint = LLM_ENDPOINT,
     ):
         """
         Initialize an Agent instance connected to an OpenAI-compatible LLM service.
@@ -42,11 +44,12 @@ class Agent:
             client (OpenAI): OpenAI API client connected to LLM_ENDPOINT
         """
         self.name = name
+        self.endpoint = endpoint
         self.system_prompt = system_prompt
         self.tools: Dict[str, Tool] = {t.name: t for t in tools}
         self.history = []
         self.model = model
-        self.client = OpenAI(base_url=LLM_ENDPOINT, api_key="ollama") # api_key is required but not used for local Ollama
+        self.client = OpenAI(base_url=self.endpoint, api_key="ollama") # api_key is required but not used for local Ollama
         self.options = options
         self.format = format
 
@@ -120,7 +123,6 @@ class Agent:
 
         if self.format:
             chat_kwargs["response_format"] = {"type": "json_schema", "json_schema": self.format}
-            #chat_kwargs["response_format"] = {"type": self.format}
 
         # The OpenAI API doesn't have an 'options' parameter like ollama's.
         # These would need to be mapped to top-level arguments like temperature, top_p, etc.
@@ -161,11 +163,18 @@ class Agent:
     def _handle_response(self, message: Dict[str, Any]) -> Any:
         """
         Processes and executes tool calls from an incoming message dictionary.
+        If no tool calls, it cleans and returns the content.
         """
         tool_calls = message.get("tool_calls")
         if not tool_calls:
             print("No tool calls")
-            return message.get("content")
+            content = message.get("content", "")
+            if content:
+                # Models sometimes wrap JSON in markdown, so we strip it.
+                match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", content)
+                if match:
+                    return match.group(2).strip()
+            return content.strip()
 
         results = []
         for call in tool_calls:
