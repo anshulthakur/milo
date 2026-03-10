@@ -478,5 +478,76 @@ class TestCrabIntegration(unittest.TestCase):
         self.assertEqual(reviews[0].anchor.symbol_name, "main")
         self.assertGreater(len(reviews[0].conversation), 0, "The saved review has no comments.")
 
+    def test_run_crab_e2e_standalone_mixed_languages(self):
+        """
+        Exploratory end-to-end test for run_crab in standalone mode (no git).
+        Reviews a folder with C and Python files.
+        """
+        # 1. Setup standalone directory
+        standalone_dir = self.tmp_dir / "standalone_mixed"
+        standalone_dir.mkdir()
+        
+        # 2. Create C file with issues
+        c_file = standalone_dir / "unsafe.c"
+        c_file.write_text("""
+#include <stdio.h>
+#include <string.h>
+
+void process_input(char *input) {
+    char buffer[10];
+    strcpy(buffer, input); // Buffer overflow vulnerability
+    printf("Processed: %s", buffer);
+}
+""", encoding='utf-8')
+
+        # 3. Create Python file with issues
+        py_file = standalone_dir / "script.py"
+        py_file.write_text("""
+def connect_db():
+    password = "password123" # Hardcoded credential
+    print("Connecting...")
+""", encoding='utf-8')
+
+        # 4. Run CRAB in standalone mode
+        # In standalone mode, the CLI typically gathers files. Here we pass them explicitly.
+        files_to_review = [str(c_file), str(py_file)]
+        
+        print("\n--- Running CRAB E2E Standalone (Mixed Languages) ---")
+        run_crab(vcs=None, repo_root=str(standalone_dir), files=files_to_review)
+        
+        # 5. Load and inspect ReviewStore
+        review_store_path = standalone_dir / ".milo" / "reviews.json"
+        self.assertTrue(review_store_path.exists(), "Review store file was not created.")
+        store = ReviewStore(review_store_path)
+        
+        reviews = list(store.reviews.values())
+        
+        print("\n--- Saved Reviews from Standalone Run ---")
+        if not reviews:
+            print("No reviews found in the store.")
+        for review in reviews:
+            print(f"Review ID: {review.id}")
+            print(f"  File: {review.anchor.file_path}")
+            print(f"  Symbol: {review.anchor.symbol_name}")
+            print(f"  Status: {review.status.value}")
+            print("  Conversation:")
+            for comment in review.conversation:
+                print(f"    - {comment.role.upper()}: {comment.content.strip()}")
+            print("-" * 20)
+        print("-----------------------------------------\n")
+
+        # 6. Assertions
+        self.assertGreater(len(reviews), 0, "No reviews were generated.")
+        
+        # Check for Python review
+        py_reviews = [r for r in reviews if r.anchor.file_path.endswith("script.py")]
+        self.assertTrue(len(py_reviews) > 0, "No reviews for Python file.")
+        self.assertEqual(py_reviews[0].anchor.symbol_name, "connect_db")
+        
+        # Check for C review
+        c_reviews = [r for r in reviews if r.anchor.file_path.endswith("unsafe.c")]
+        self.assertTrue(len(c_reviews) > 0, "No reviews for C file.")
+        self.assertEqual(c_reviews[0].anchor.symbol_name, "process_input")
+
 if __name__ == '__main__':
     unittest.main()

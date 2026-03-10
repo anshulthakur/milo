@@ -229,10 +229,12 @@ def perform_review(agent, lang, code, file_path, symbol_name, history, review_st
                        "The `method` field contains the full function source after applying changes. "
                        "Focus on issues introduced by the change (lines starting with +). "
                        "Do not comment on parts of the code that were not changed. "
-                       "Return the result in JSON format using the schema provided.")
+                       "Return the result in JSON format using the schema provided. "
+                       "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
         else:
             request = ("Please review the entire method source provided for potential bugs, style violations, or performance issues. "
-                       "Return the result in JSON format using the schema provided.")
+                       "Return the result in JSON format using the schema provided. "
+                       "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
 
         user_prompt = ReviewInputCode(
             language=lang,
