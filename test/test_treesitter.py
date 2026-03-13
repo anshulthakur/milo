@@ -1,12 +1,134 @@
 import unittest
+import shutil
 from pathlib import Path
 from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
 
 class TestTreesitter(unittest.TestCase):
 
+    def create_test_files(self, repo_path: Path):
+        repo_path.mkdir(parents=True, exist_ok=True)
+        
+        (repo_path / "file1.py").write_text("""import os
+import sys
+import asyncio
+
+GLOBAL_VAR = "Hello"
+
+def decorator(func):
+    def wrapper(*args, **kwargs):
+        print("Decorator before call")
+        result = func(*args, **kwargs)
+        print("Decorator after call")
+        return result
+    return wrapper
+
+class MyClass:
+    def __init__(self, name):
+        self.name = name
+
+    def greet(self):
+        return f"Hello, {self.name}"
+
+@decorator
+def my_function(a, b):
+    \"\"\"This is a sample function.\"\"\"
+    list_comp = [i*i for i in range(a, b)]
+    return sum(list_comp)
+
+async def async_function():
+    print("Async function start")
+    await asyncio.sleep(1)
+    print("Async function end")
+
+def generator_function(n):
+    for i in range(n):
+        yield i
+
+if __name__ == "__main__":
+    instance = MyClass("World")
+    print(instance.greet())
+    print(my_function(1, 10))
+    for i in generator_function(5):
+        print(i)
+    asyncio.run(async_function())""", encoding='utf-8')
+
+        (repo_path / "file2.c").write_text("""#include "file3.h"
+
+int global_variable = 42;
+
+void function1(int arg1, char *arg2) {
+    printf("Function 1 called with %d and %s\\n", arg1, arg2);
+    for (int i = 0; i < arg1; i++) {
+        if (i % 2 == 0) {
+            puts("Even");
+        } else {
+            puts("Odd");
+        }
+    }
+}
+
+int function2(void) {
+    MyStruct s;
+    s.id = 1;
+    s.name = "Test";
+    printf("Function 2 called with struct: id=%d, name=%s\\n", s.id, s.name);
+    return inline_function(global_variable);
+}
+
+int main(int argc, char *argv[]) {
+    function1(5, "hello");
+    int result = function2();
+    printf("Result from function2: %d\\n", result);
+    return 0;
+}""", encoding='utf-8')
+
+        (repo_path / "file5.c").write_text("""#include <pthread.h>
+#include <stdio.h>
+
+void *thread_function(void *arg) {
+    printf("Inside thread\\n");
+    return NULL;
+}
+
+int main() {
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, thread_function, NULL);
+    pthread_join(thread_id, NULL);
+    return 0;
+}""", encoding='utf-8')
+
+        (repo_path / "file8.c").write_text("""#include <stdio.h>
+
+typedef void (*callback_t)(void);
+
+void register_callback(callback_t cb) {
+    cb();
+}
+
+void my_callback_handler(void) {
+    printf("Callback 1\\n");
+}
+
+void another_callback(void) {
+    printf("Callback 2\\n");
+}
+
+int main() {
+    register_callback(my_callback_handler);
+    register_callback(another_callback);
+    return 0;
+}""", encoding='utf-8')
+
     def setUp(self):
-        self.test_repo_path = Path('tests/tmp/test_repo').resolve()
+        self.test_repo_path = Path('/tmp/test_repo').resolve()
+        if self.test_repo_path.exists():
+            shutil.rmtree(self.test_repo_path)
+        self.create_test_files(self.test_repo_path)
+        
+    def tearDown(self):
+        if self.test_repo_path.exists():
+            shutil.rmtree(self.test_repo_path)
 
     def test_c_parser(self):
         """Tests the C parser with file2.c."""
@@ -179,4 +301,3 @@ def my_function(a, b):
                 print(f"Expected: {repr(expected_text)}")
                 print(f"Actual:   {repr(actual_text)}")
             self.assertEqual(actual_text, expected_text)
-

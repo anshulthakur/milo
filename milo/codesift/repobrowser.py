@@ -256,6 +256,23 @@ def summarize_module_hierarchy(G):
     return dict(module_map)
 
 
+def _get_qualified_name_from_node(func_node):
+    name = func_node.name
+    if hasattr(func_node, 'node'):
+        parent = func_node.node.parent
+        while parent:
+            if parent.type == 'class_definition':
+                class_name_node = parent.child_by_field_name('name')
+                if class_name_node:
+                    class_name = class_name_node.text.decode('utf-8')
+                    if not name.startswith(f"{class_name}."):
+                        name = f"{class_name}.{name}"
+                break
+            if parent.type in ('function_definition', 'translation_unit', 'module'):
+                break
+            parent = parent.parent
+    return name
+
 def lookaround_source_snippet(
     fn_id, G, metadata=None, context_lines=0, repo_path="", file_hint=None
 ):
@@ -302,11 +319,14 @@ def lookaround_source_snippet(
 
     try:
         func_name = resolved_id.split("::")[-1]
+        # If qualified name (MyClass.greet), search for short name (greet)
+        short_name = func_name.split(".")[-1]
+        
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
         for i, line in enumerate(lines):
-            if re.search(rf"\b{re.escape(func_name)}\b", line):
+            if re.search(rf"\b{re.escape(short_name)}\b", line):
                 start = max(i - context_lines, 0)
                 end = min(i + context_lines + 1, len(lines))
                 return "".join(lines[start:end])
@@ -381,7 +401,8 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
         treesitter.parse(code.encode("utf8"))
         functions = treesitter.get_definitions("function")
         for func in functions:
-            if func.name == func_name:
+            qname = _get_qualified_name_from_node(func)
+            if qname == func_name:
                 return func.source_code
         return "[Function not located in source]"
 

@@ -3,526 +3,517 @@ import sys
 import networkx as nx
 from milo.codesift.parsers.treesitter.treesitter import Treesitter
 from milo.codesift.parsers.languages import supported_languages, supported_extensions
-from milo.codesift.parsers.utils import get_programming_language, get_file_extension
+from milo.codesift.parsers.utils import get_programming_language, get_file_extension, guess_extension_from_shebang
 from tree_sitter import Node, Tree
 import json
 import re
 from collections import defaultdict
 import traceback
+from milo.codesift.repository import Repository
 
-call_dict = {}
-
-
-def node_val(source_byte, node):
+class RepoGraph:
     """
-    Extracts a UTF-8 decoded string slice from source_byte based on node's byte offsets.
-    
-    Args:
-        source_byte (bytes): Raw byte data to extract content from
-        node: Object containing start_byte and end_byte attributes defining the slice range. 
-            Expected to be an AST/parse node with byte offset metadata.
-    
-    Returns:
-        str: Decoded substring corresponding to the node's position in source_byte
-    
-    Raises:
-        UnicodeDecodeError: If the byte slice contains invalid UTF-8 sequences
-    
-    Context:
-        Used in syntax parsing workflows where nodes represent tokenized elements 
-        with byte-range metadata (common in AST/CFG processing pipelines).
+    Encapsulates the repository call graph and providing browsing utilities.
     """
-    return source_byte[node.start_byte : node.end_byte].decode("utf8")
+    def __init__(self, repository: Repository):
+        self.repo = repository
+        self.graph = nx.DiGraph()
+        self.call_dict = {}
+        self.metadata = {}
+        self.reset_call_dict()
 
+    def reset_call_dict(self):
+        self.call_dict.clear()
+        self.call_dict["third_party"] = defaultdict(lambda: {"called_by": []})
+        self.call_dict["dynamic_entry_point_candidates"] = []
 
-def guess_extension_from_shebang(file_path=None, file_content=None)-> str:
-    """
-    Analyzes the shebang line of a script to infer its programming language extension.
-    
-    Args:
-        file_path (str, optional): Path to the file. Mutually exclusive with file_content.
-        file_content (str, optional): Contents of the file. Mutually exclusive with file_path.
-    
-    Returns:
-        str or None: Mapped file extension (e.g., ".py" for Python) if shebang matches a known pattern,
-                        otherwise None. Returns None also on I/O errors or invalid input.
-    
-    Raises:
-        None: Exceptions are caught internally and logged via traceback.print_exc().
-    
-    Shebang interpreter mapping includes:
-        "python" -> ".py",
-        "perl" -> ".pl",
-        "ruby" -> ".rb",
-        "node" -> ".js",
-        "java" -> ".java",
-    
-    Behavior:
-    - Extracts the interpreter from the shebang line by taking the last path segment.
-    - Performs case-insensitive substring matching of interpreter names against known patterns.
-    - Returns first matching extension; otherwise returns None.
-    - Handles edge cases like empty file_content or invalid file paths gracefully.
-    """
-    try:
-        if file_path is not None:
-            with open(file_path, "r") as file:
-                first_line = file.readline().strip()
-        else:
-            first_line = file_content.splitlines()[0].strip()
-
-        print(first_line)
-        if not first_line.startswith("#!"):
-            return ''
-
-        # Map common shebang patterns to programming languages
-        shebang_map = {
-            "python": ".py",
-            "perl": ".pl",
-            "ruby": ".rb",
-            "node": ".js",
-            "java": ".java",
-        }
-
-        # Extract the interpreter from the shebang
-        interpreter = first_line.split("/")[-1]
-
-        # print(interpreter)
-
-        for key, extension in shebang_map.items():
-            if key in interpreter.lower():
-                return extension
-
-        return ''
-
-    except Exception as e:
-        traceback.print_exc()
-        return ''
-
-
-def update_callgraph(caller, callee=None, params=None, filename=None):
-    """
-    Update the global call_dict structure with new caller-callee relationships.
-
-    This function maintains a repository-wide call graph by either:
-    1. Creating a new entry for a caller function
-    2. Updating an existing caller's called functions list
-    3. Tracking third-party/external function calls
-    4. Handling parameter changes in function definitions
-
-    Parameters:
-        caller (str): Name of the calling function
-        callee (str, optional): Name of the called function. Defaults to None.
-        params (str, optional): Parameter string for the caller function. Defaults to None.
-        filename (str, optional): Source file where the caller is defined. Defaults to None.
-
-    Behavior:
-    - Creates a namespaced key using filename + '::' + caller if provided
-    - Initializes new caller entries with metadata and empty call list
-    - Resolves callees by searching existing keys in call_dict
-    - Tracks unresolved callees under 'third_party' section
-    - Issues warnings when function signatures change during analysis
-    - Maintains unique relationships between functions
-
-    The global call_dict structure contains:
-    {
-        "func_name": str, 
-        "args": str, 
-        "calls": [callee_keys],
-        "defined_in": str, 
-    }
-
-    Note: Third-party calls are stored in a nested 'third_party' dictionary with metadata about callers.
-    Warnings are printed when parameter mismatches occur between function definitions and existing entries.
-    """
-    global call_dict
-    if filename:
-        key = f"{filename}::{caller}"
-    else:
-        key = caller
-
-    callee_key = None
-
-    if key not in call_dict:
-        call_dict[key] = {
-            "func_name": caller,
-            "args": params or "",
-            "calls": [],
-            "defined_in": filename,
-        }
-
-    if callee:
-        # If callee is already defined somewhere, use that key if known
-        if not callee_key:
-            for k in call_dict:
-                if k.endswith(f"::{callee}"):
-                    callee_key = k
+    def _get_qualified_name(self, func_node):
+        name = func_node.name
+        # Heuristic for Python class methods
+        if hasattr(func_node, 'node'):
+            parent = func_node.node.parent
+            while parent:
+                if parent.type == 'class_definition':
+                    class_name_node = parent.child_by_field_name('name')
+                    if class_name_node:
+                        class_name = class_name_node.text.decode('utf-8')
+                        if not name.startswith(f"{class_name}."):
+                            name = f"{class_name}.{name}"
                     break
+                if parent.type in ('function_definition', 'translation_unit', 'module'):
+                    break
+                parent = parent.parent
+        return name
 
-        # If still unresolved, record it as a third-party call
-        if not callee_key:
-            third_party = call_dict.setdefault("third_party", {})
-            tp = third_party.setdefault(callee, {"called_by": []})
-            if key not in tp["called_by"]:
-                tp["called_by"].append(key)
+    def update_callgraph(self, caller, callee=None, params=None, filename=None):
+        if filename:
+            key = f"{filename}::{caller}"
         else:
-            if callee_key not in call_dict[key]["calls"]:
-                call_dict[key]["calls"].append(callee_key)
+            key = caller
 
-    if params and call_dict[key]["args"] != params.strip():
-        print(
-            f"Warning: Update {key} params from {call_dict[key]['args'].strip()} to {params}"
-        )
-        call_dict[key]["args"] = params.strip()
+        callee_key = None
 
+        if key not in self.call_dict:
+            self.call_dict[key] = {
+                "func_name": caller,
+                "args": params or "",
+                "calls": [],
+                "defined_in": filename,
+            }
 
-def list_source_files(root, supported_ext):
-    """
-    Recursively lists all files with specified extensions under a given directory root.
-    
-    Args:
-        root (str): The root directory path to start scanning for files.
-        supported_ext (List[str]): List of file extensions (e.g. [".py", ".c"]) to include in results.
-    
-    Yields:
-        str: Full path to each matching source file found under the root directory.
-    
-    Note:
-        This function is used by create_repograph() in crab/agents/repograph.py to collect files for repository graph construction. Uses os.walk() for recursive directory traversal. Filenames are matched exactly against extensions (case-sensitive).
-    """
-    for dirpath, _, filenames in os.walk(root):
-        for fname in filenames:
-            if any(fname.endswith(ext) for ext in supported_ext):
-                yield os.path.join(dirpath, fname)
+        if callee:
+            if not callee_key:
+                for k in self.call_dict:
+                    if k.endswith(f"::{callee}"):
+                        callee_key = k
+                        break
 
+            if not callee_key:
+                third_party = self.call_dict.setdefault("third_party", {})
+                tp = third_party.setdefault(callee, {"called_by": []})
+                if key not in tp["called_by"]:
+                    tp["called_by"].append(key)
+            else:
+                if callee_key not in self.call_dict[key]["calls"]:
+                    self.call_dict[key]["calls"].append(callee_key)
 
-def extract_context_subgraph(G, center_func, depth):
-    """
-    Extracts a context subgraph centered on a specific node in a directed graph, including predecessors (callers) and successors (callees) up to a specified depth.
-    
-    Parameters:
-        G (networkx.DiGraph): Directed graph representing function call relationships where nodes are functions and edges represent calls. Assumed to be pre-validated for existence of `center_func`.
-        center_func (str): The central function node to build the subgraph around. Must exist in G.
-        depth (int): Maximum traversal depth in both directions from the center node. Each direction (callers/callees) receives floor(depth/2) levels of expansion. For odd depths, the extra level is discarded (e.g., depth=3 → 1 level per direction).
-    
-    Returns:
-        networkx.DiGraph: Subgraph containing all nodes within `depth//2` levels of predecessors and successors relative to the center function, including the center itself. Returns only {center_func} if no neighbors exist at specified depth.
-    
-    Example:
-        For depth=2 → 1 level of callers and 1 level of callees
-        For depth=3 → still 1 level in each direction (3//2 = 1)
-    
-    Notes:
-        - Zero depth returns a subgraph with only the center function
-        - Depth is applied symmetrically to both directions
-        - Handles cyclic graphs safely via set-based frontier tracking
-    """
-    subgraph_nodes = set()
-    for direction in [G.successors, G.predecessors]:
-        frontier = {center_func}
-        for _ in range(depth // 2):
-            next_frontier = set()
-            for node in frontier:
-                next_frontier.update(direction(node))
-            subgraph_nodes.update(next_frontier)
-            frontier = next_frontier
-    subgraph_nodes.add(center_func)
-    return G.subgraph(subgraph_nodes)
+        if params and self.call_dict[key]["args"] != params.strip():
+            # print(f"Warning: Update {key} params from {self.call_dict[key]['args'].strip()} to {params}")
+            self.call_dict[key]["args"] = params.strip()
 
+    def extract_function_calls(self, treesitter: Treesitter, filename: str):
+        # 1. Map function definitions
+        functions = treesitter.get_definitions("function")
 
-def extract_function_calls(treesitter: Treesitter, filename: str):
-    """
-    Extracts function call relationships from an AST (Abstract Syntax Tree) for code analysis.
+        for func_node in functions:
+            current_func = self._get_qualified_name(func_node)
+            params = func_node.parameters
+            self.update_callgraph(caller=current_func, params=params, filename=filename)
 
-    Args:
-        treesitter (Treesitter): Treesitter object for the language.
-        filename (str): File path context for cross-file callgraph tracking.
+        # 2. Map direct calls within functions
+        for func_node in functions:
+            current_func = self._get_qualified_name(func_node)
+            calls = treesitter.get_calls(func_node.node)
+            for call_node in calls:
+                callee = call_node.name
+                self.update_callgraph(caller=current_func, callee=callee, filename=filename)
 
-    Returns:
-        List[Tuple[str, str]]: Direct function call relationships as (caller_function_name, 
-                                callee_function_name) pairs.
+        # 3. Map dynamic entry points (File-level scan)
+        # We scan the whole file tree because dynamic entries (callbacks) might happen 
+        # inside functions, or potentially in global scope initializers (C/C++).
+        if hasattr(treesitter, 'tree') and treesitter.tree:
+            root = treesitter.tree.root_node
+            dynamic_entries = treesitter.get_dynamic_entry_points(root)
+            for entry in dynamic_entries:
+                candidate_name = entry.name
+                call_expr_node = entry.node
+                while call_expr_node and call_expr_node.type != 'call_expression':
+                    call_expr_node = call_expr_node.parent
 
-    Raises:
-        ValueError: If lang is not supported by LANGUAGE_HANDLERS.
+                if call_expr_node:
+                    function_id_node = call_expr_node.child_by_field_name('function')
+                    if function_id_node:
+                        dynamic_caller_name = function_id_node.text.decode().strip()
+                        caller_key = f"{filename}::{dynamic_caller_name}"
+                        if candidate_name:
+                            candidate_name = candidate_name.strip()
+                            self.call_dict['dynamic_entry_point_candidates'].append((caller_key, candidate_name))
 
-    Notes:
-        - Uses language-specific handlers to parse syntax (e.g., Python's 'def' vs JS's 'function')
-        - Maintains call_dict and callgraph for cross-file dependency analysis via update_callgraph()
-        - Filters out built-in keywords and handles third-party imports by tracking 
-            "third_party" functions in call_dict
-        - Recursive traversal of AST nodes to capture nested function calls
-    """
-    functions = treesitter.get_definitions("function")
+    def resolve_dynamic_entry_points(self):
+        candidates = self.call_dict.pop('dynamic_entry_point_candidates', [])
+        if not candidates:
+            return
 
-    # First, register all function definitions in the file
-    for func_node in functions:
-        current_func = func_node.name
-        params = func_node.parameters
-        update_callgraph(caller=current_func, params=params, filename=filename)
+        name_to_key_map = defaultdict(list)
+        for k in self.call_dict:
+            if k not in ("third_party", "dynamic_entry_point_candidates") and "::" in k:
+                name_to_key_map[k.split('::')[-1]].append(k)
 
-    # Then, process all calls and dynamic entry points
-    for func_node in functions:
-        current_func = func_node.name
-        calls = treesitter.get_calls(func_node.node)
-        for call_node in calls:
-            callee = call_node.name
-            update_callgraph(caller=current_func, callee=callee, filename=filename)
-
-        dynamic_entries = treesitter.get_dynamic_entry_points(func_node.node)
-        for entry in dynamic_entries:
-            candidate_name = entry.name
+        for caller_key, candidate_name in candidates:
+            # 1. Resolve the Callee (the function being registered)
+            possible_callees = name_to_key_map.get(candidate_name, [])
+            resolved_callee_key = None
+            caller_filename = caller_key.split('::')[0]
             
-            call_expr_node = entry.node
-            while call_expr_node and call_expr_node.type != 'call_expression':
-                call_expr_node = call_expr_node.parent
-
-            if call_expr_node:
-                function_id_node = call_expr_node.child_by_field_name('function')
-                if function_id_node:
-                    dynamic_caller_name = function_id_node.text.decode()
-                    caller_key = f"{filename}::{dynamic_caller_name}"
-                    call_dict['dynamic_entry_point_candidates'].append((caller_key, candidate_name))
-
-def resolve_dynamic_entry_points(call_dict):
-    candidates = call_dict.pop('dynamic_entry_point_candidates', [])
-    if not candidates:
-        return
-
-    # Build a lookup from short name to full key(s)
-    name_to_key_map = defaultdict(list)
-    for k in call_dict:
-        if '::' in k:
-            name_to_key_map[k.split('::')[-1]].append(k)
-
-    for caller_key, candidate_name in candidates:
-        possible_callees = name_to_key_map.get(candidate_name, [])
-        
-        if not possible_callees:
-            # Not a function defined in the repo. Could be a third-party one.
-            update_callgraph(caller=caller_key.split('::')[-1], callee=candidate_name, filename=caller_key.split('::')[0])
-            continue
-
-        # Try to find a callee in the same file as the caller
-        caller_filename = caller_key.split('::')[0]
-        callee_in_same_file = None
-        for key in possible_callees:
-            if key.startswith(caller_filename + '::'):
-                callee_in_same_file = key
-                break
-        
-        resolved_callee_key = callee_in_same_file
-        if not resolved_callee_key and len(possible_callees) == 1:
-            # Unambiguous, even if in another file
-            resolved_callee_key = possible_callees[0]
+            if possible_callees:
+                # Prefer same file
+                for key in possible_callees:
+                    if key.startswith(caller_filename + '::'):
+                        resolved_callee_key = key
+                        break
+                # Fallback to unique global match
+                if not resolved_callee_key and len(possible_callees) == 1:
+                    resolved_callee_key = possible_callees[0]
             
-        if resolved_callee_key:
-            # Add edge
-            if caller_key in call_dict and resolved_callee_key not in call_dict[caller_key]['calls']:
-                call_dict[caller_key]['calls'].append(resolved_callee_key)
+            # If callee is found, mark it as a dynamic entry point
+            if resolved_callee_key and resolved_callee_key in self.call_dict:
+                self.call_dict[resolved_callee_key]['is_dynamic_entry_point'] = True
             
-            # Mark as dynamic entry point
-            if resolved_callee_key in call_dict:
-                call_dict[resolved_callee_key]['is_dynamic_entry_point'] = True
-        else:
-            # Ambiguous case. For now, do nothing.
-            print(f"Ambiguous dynamic call to '{candidate_name}' from '{caller_key}'. Candidates: {possible_callees}")
-            pass
+            # 2. Resolve the Caller (the registrar function)
+            # The caller_key constructed in extract_function_calls uses the call-site filename.
+            # If the registrar is defined in the same file, this key matches exactly.
+            resolved_caller_key = None
+            if caller_key in self.call_dict:
+                resolved_caller_key = caller_key
+            else:
+                # Try to resolve by name if exact key match fails (e.g. path differences)
+                caller_name = caller_key.split('::')[-1]
+                possible_callers = name_to_key_map.get(caller_name, [])
+                
+                # Prefer same file
+                for key in possible_callers:
+                    if key.startswith(caller_filename + '::'):
+                        resolved_caller_key = key
+                        break
+                
+                # Fallback to unique global match
+                if not resolved_caller_key and len(possible_callers) == 1:
+                    resolved_caller_key = possible_callers[0]
+            
+            # 3. Add the edge if both resolved
+            # This represents that 'registering' the callback implies the registrar 'calls' the callback
+            if resolved_callee_key and resolved_caller_key:
+                if resolved_caller_key in self.call_dict:
+                     if resolved_callee_key not in self.call_dict[resolved_caller_key]['calls']:
+                        self.call_dict[resolved_caller_key]['calls'].append(resolved_callee_key)
 
-def create_repograph(root, search=None, save_path="./"):
-    """
-    Constructs a repository-level call graph from source code files in C/C++/Python with enhanced contextual analysis.
-    
-    Args:
-        root (str): Root directory path containing source code to analyze
-        search (str, optional): Function name to generate contextual subgraph for. Triggers depth-4 subgraph extraction when specified. Defaults to None.
-        save_path (str, optional): Directory path to save output artifacts. Defaults to './'.
-    
-    Returns:
-        None: Output is saved as multiple files in save_path directory:
-            - callgraph.dot: DOT format call graph visualization
-            - callflow.txt: Hierarchical text representation of function calls
-            - metadata.json: Structured mapping of functions with metadata including:
-                * semantic_role (initializer/handler/utility/test)
-                * is_test flag
-                * call_depth tracking
-                * cyclomatic_complexity metrics
-                * source file associations
-    
-    Process Enhancements:
-    1. Uses guess_extension_from_shebang() for ambiguous file types
-    2. Leverages get_parser() for language-specific AST parsing
-    3. Integrates extract_function_calls() with error resilience
-    4. Creates external::<name> nodes for third-party functions not defined in repo
-    5. Applies semantic role detection based on naming patterns and file context:
-       - initializer: functions starting with init/setup
-       - handler: functions containing handle/handler in name
-       - utility: files/modules containing 'util' or 'helper'
-       - test: functions/files containing 'test' in name/path
-    6. Generates contextual subgraphs using extract_context_subgraph() with 4-level depth
-    7. Maintains global call_dict for cross-file reference tracking and state persistence
-    
-    Dependencies:
-    - Requires networkx and pydot for graph operations
-    - Uses language-specific parsers via get_parser()
-    - Relies on module-level call_dict for cross-file analysis
-    - Integrates with extract_function_calls() and list_source_files() utilities
-    """
+    def resolve_references(self):
+        """
+        Resolves calls that were tentatively marked as third-party because the callee
+        had not been parsed yet.
+        """
+        third_party = self.call_dict.get("third_party", {})
+        if not third_party:
+            return
 
-    graph = nx.DiGraph()
-    call_dict.clear()  # Reset global state
-    call_dict["third_party"] = defaultdict(lambda: {"called_by": []})
-    call_dict["dynamic_entry_point_candidates"] = []
+        # Build lookup map for all defined functions
+        name_to_key_map = defaultdict(list)
+        for k in self.call_dict:
+            if k not in ("third_party", "dynamic_entry_point_candidates") and "::" in k:
+                name_to_key_map[k.split('::')[-1]].append(k)
 
-    # 1️⃣ Parse each file and populate call_dict
-    for filepath in list_source_files(root, supported_extensions()):
-        extension = get_file_extension(filepath)
-        if len(extension) == 0:
-            extension = guess_extension_from_shebang(file_path=filepath)
-        if len(extension) == 0:
-            print(f"Undetermined extension in {filepath}")
-            continue
-        lang = get_programming_language(extension)
-        if lang.value not in supported_languages():
-            print(f"Language {lang} not supported yet.")
-            continue
-        treesitter = Treesitter.create_treesitter(lang)
-        rel_path = filepath.replace(root + "/", "")
-        # print(f'Parsing {rel_path}')
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            code = f.read()
-        treesitter.parse(code.encode("utf8"))
-        try:
-            extract_function_calls(
-                treesitter,
-                filename=rel_path
+        resolved_callees = []
+
+        for callee_name, info in third_party.items():
+            possible_matches = name_to_key_map.get(callee_name)
+            if possible_matches:
+                # Match found in repo; resolve to the first match
+                target_key = possible_matches[0]
+                
+                # Update callers
+                for caller_key in info.get("called_by", []):
+                    if caller_key in self.call_dict:
+                        if target_key not in self.call_dict[caller_key]["calls"]:
+                            self.call_dict[caller_key]["calls"].append(target_key)
+                
+                resolved_callees.append(callee_name)
+
+        # Remove resolved from third_party
+        for callee in resolved_callees:
+            del third_party[callee]
+
+    def build(self):
+        self.graph = nx.DiGraph()
+        self.reset_call_dict()
+
+        # 1. Parse each file
+        files = self.repo.list_files()
+        for filepath in files:
+            extension = get_file_extension(filepath)
+            content = self.repo.get_file_content(filepath)
+            if not content:
+                continue
+
+            if len(extension) == 0:
+                extension = guess_extension_from_shebang(file_content=content)
+            
+            if not extension:
+                # print(f"Undetermined extension in {filepath}")
+                continue
+                
+            lang = get_programming_language(extension)
+            if lang.value not in supported_languages():
+                continue
+            
+            treesitter = Treesitter.create_treesitter(lang)
+            rel_path = os.path.relpath(filepath, self.repo.root_path)
+            
+            try:
+                treesitter.parse(content.encode("utf8"))
+                self.extract_function_calls(treesitter, filename=rel_path)
+            except Exception:
+                print(f"Could not extract calls from {filepath}")
+                traceback.print_exc()
+
+        self.resolve_references()
+        self.resolve_dynamic_entry_points()
+
+        # 2. Add definitions to graph
+        for func_id, meta in self.call_dict.items():
+            if func_id in ["third_party", "dynamic_entry_points"]:
+                continue
+            self.graph.add_node(func_id, label=func_id.split("::")[-1], **meta)
+            for callee_key in meta.get("calls", []):
+                self.graph.add_edge(func_id, callee_key)
+
+        # 3. Track third-party
+        third_party = self.call_dict.get("third_party", {})
+        for callee, info in third_party.items():
+            stub_id = f"external::{callee}"
+            if not self.graph.has_node(stub_id):
+                self.graph.add_node(
+                    stub_id,
+                    label=callee,
+                    func_name=callee,
+                    defined_in="external",
+                    calls=[],
+                    is_third_party=True,
+                )
+            for caller in info.get("called_by", []):
+                if self.graph.has_node(caller):
+                    self.graph.add_edge(caller, stub_id)
+
+        # 4. Annotate metadata
+        for func_id, meta in self.call_dict.items():
+            if func_id in ["third_party", "dynamic_entry_points"]:
+                continue
+
+            file = meta.get("defined_in", "").lower()
+            name = func_id.split("::")[-1].lower()
+
+            meta["incoming_calls"] = (
+                list(self.graph.predecessors(func_id)) if func_id in self.graph else []
             )
-        except:
-            print(f"Could not extract calls from {filepath}")
-            traceback.print_exc()
-
-    resolve_dynamic_entry_points(call_dict)
-
-    # 2️⃣ Add known function definitions to the graph
-    for func_id, meta in call_dict.items():
-        if func_id in ["third_party", "dynamic_entry_points"]:
-            continue
-        graph.add_node(func_id, label=func_id.split("::")[-1], **meta)
-        for callee_key in meta.get("calls", []):
-            graph.add_edge(func_id, callee_key)
-
-    # 3️⃣ Track third-party functions in graph
-    third_party = call_dict.get("third_party", {})
-    for callee, info in third_party.items():
-        stub_id = f"external::{callee}"
-        if not graph.has_node(stub_id):
-            graph.add_node(
-                stub_id,
-                label=callee,
-                func_name=callee,
-                defined_in="external",
-                calls=[],
-                is_third_party=True,
-            )
-        for caller in info.get("called_by", []):
-            if graph.has_node(caller):
-                graph.add_edge(caller, stub_id)
-
-    # 4️⃣ Annotate additional metadata for defined functions
-    for func_id, meta in call_dict.items():
-        if func_id in ["third_party", "dynamic_entry_points"]:
-            continue
-
-        file = meta.get("defined_in", "").lower()
-        name = func_id.split("::")[-1].lower()
-
-        meta["incoming_calls"] = (
-            list(graph.predecessors(func_id)) if func_id in graph else []
-        )
-        meta["semantic_role"] = (
-            "initializer"
-            if name.startswith("init") or name.startswith("setup")
-            else (
-                "handler"
-                if name.startswith("handle") or name.endswith("handler")
+            meta["semantic_role"] = (
+                "initializer"
+                if name.startswith("init") or name.startswith("setup")
                 else (
-                    "utility"
-                    if "util" in file or "helper" in file
+                    "handler"
+                    if name.startswith("handle") or name.endswith("handler")
                     else (
-                        "test"
-                        if "test" in file or name.startswith("test_")
-                        else "unspecified"
+                        "utility"
+                        if "util" in file or "helper" in file
+                        else (
+                            "test"
+                            if "test" in file or name.startswith("test_")
+                            else "unspecified"
+                        )
                     )
                 )
             )
-        )
-        meta["is_test"] = "test" in file or name.startswith("test_")
-        meta["call_depth"] = None
-        meta["docstring"] = None
-        meta["cyclomatic_complexity"] = None
-        meta["lines_of_code"] = None
-        meta["last_modified_by"] = None
+            meta["is_test"] = "test" in file or name.startswith("test_")
+            meta["call_depth"] = None
 
-    # 5️⃣ Write DOT callgraph
-    nx.drawing.nx_pydot.write_dot(graph, os.path.join(save_path, "callgraph.dot"))
+    def save(self, save_path: str):
+        # Write DOT
+        nx.drawing.nx_pydot.write_dot(self.graph, os.path.join(save_path, "callgraph.dot"))
 
-    # 6️⃣ Save callflow tree
-    def print_call_tree(func, depth=0, visited=None):
-        if visited is None:
-            visited = set()
-        if func in visited:
-            return
-        visited.add(func)
-        callflow_file.write("  " * depth + func + "\n")
-        for callee in graph.successors(func):
-            print_call_tree(callee, depth + 1, visited)
+        # Write Callflow text
+        with open(os.path.join(save_path, "callflow.txt"), "w") as callflow_file:
+            def print_call_tree(func, depth=0, visited=None):
+                if visited is None:
+                    visited = set()
+                if func in visited:
+                    return
+                visited.add(func)
+                callflow_file.write("  " * depth + func + "\n")
+                for callee in self.graph.successors(func):
+                    print_call_tree(callee, depth + 1, visited)
 
-    with open(os.path.join(save_path, "callflow.txt"), "w") as callflow_file:
-        top_level_funcs = [node for node in graph.nodes if graph.in_degree(node) == 0]
-        for func in sorted(top_level_funcs):
-            print_call_tree(func, visited=set())
+            top_level_funcs = [node for node in self.graph.nodes if self.graph.in_degree(node) == 0]
+            for func in sorted(top_level_funcs):
+                print_call_tree(func, visited=set())
 
-    # 7️⃣ Build metadata.json in new format
-    defined_mappings = {}
-    third_party_mappings = {}
-    lookup = defaultdict(list)
+        # Build metadata.json
+        defined_mappings = {}
+        third_party_mappings = {}
+        lookup = defaultdict(list)
+        
+        third_party = self.call_dict.get("third_party", {})
 
-    for fn_id, meta in call_dict.items():
-        if fn_id in ["third_party", "dynamic_entry_points"]:
-            continue
-        shortname = fn_id.split("::")[-1]
-        defined_mappings[fn_id] = meta
-        lookup[shortname].append(fn_id)
+        for fn_id, meta in self.call_dict.items():
+            if fn_id in ["third_party", "dynamic_entry_points"]:
+                continue
+            shortname = fn_id.split("::")[-1]
+            defined_mappings[fn_id] = meta
+            lookup[shortname].append(fn_id)
 
-    for shortname, third_meta in third_party.items():
-        third_party_mappings[shortname] = {
-            "name": shortname,
-            "calls": [],
-            "called_by": third_meta["called_by"],
-            "defined_in": "external",
-            "is_third_party": True,
+        for shortname, third_meta in third_party.items():
+            third_party_mappings[shortname] = {
+                "name": shortname,
+                "calls": [],
+                "called_by": third_meta["called_by"],
+                "defined_in": "external",
+                "is_third_party": True,
+            }
+            if shortname not in lookup:
+                lookup[shortname] = [shortname]
+
+        metadata_out = {
+            "lookup": dict(lookup),
+            "defined_mappings": defined_mappings,
+            "third_party_mappings": third_party_mappings,
         }
-        if shortname not in lookup:
-            lookup[shortname] = [shortname]
 
-    metadata = {
-        "lookup": dict(lookup),
-        "defined_mappings": defined_mappings,
-        "third_party_mappings": third_party_mappings,
-    }
+        with open(os.path.join(save_path, "metadata.json"), "w") as f:
+            json.dump(metadata_out, f, indent=2)
+            
+        self.metadata = metadata_out
 
-    with open(os.path.join(save_path, "metadata.json"), "w") as f:
-        json.dump(metadata, f, indent=2)
+    def load(self, metadata_path: str):
+        with open(metadata_path, "r") as f:
+            metadata_all = json.load(f)
 
-    # 8️⃣ Save contextual subgraph if requested
-    if search:
-        if search in graph:
-            ctx = extract_context_subgraph(graph, search, depth=4)
-            dot_path = os.path.join(
-                save_path, f"{search.replace('::', '_')}_context.dot"
-            )
-            nx.drawing.nx_pydot.write_dot(ctx, dot_path)
-            print(f"Contextual callgraph for '{search}' saved to: {dot_path}")
-        else:
-            print(f"Function '{search}' not found in graph.")
+        lookup = metadata_all.get("lookup", {})
+        defined = metadata_all.get("defined_mappings", {})
+        third_party = metadata_all.get("third_party_mappings", {})
+
+        def get_label(fn_id):
+            return fn_id.split("::")[-1]
+
+        self.graph = nx.DiGraph()
+        for fn_id, meta in defined.items():
+            self.graph.add_node(fn_id, label=get_label(fn_id), **meta)
+
+        for fn_id, meta in third_party.items():
+            self.graph.add_node(fn_id, label=fn_id, **meta)
+
+        for fn_id, meta in defined.items():
+            for callee in meta.get("calls", []):
+                if not self.graph.has_node(callee):
+                    self.graph.add_node(callee, label=get_label(callee))
+                self.graph.add_edge(fn_id, callee)
+
+        self.graph.graph["lookup"] = lookup
+        self.metadata = metadata_all
+
+    def resolve_function_name(self, name: str, file_hint: str = None) -> str | None:
+        lookup = self.metadata.get("lookup", {})
+        matches = lookup.get(name, [])
+
+        if not matches:
+            return None
+
+        if file_hint:
+            for m in matches:
+                if m.startswith(file_hint + "::"):
+                    return m
+            return None
+
+        if len(matches) == 1:
+            return matches[0]
+
+        return None
+
+    def get_function_metadata(self, fn_id: str, file_hint: str = None) -> dict | None:
+        resolved_id = fn_id
+        if "::" not in fn_id:
+            resolved_id = self.resolve_function_name(fn_id, file_hint=file_hint)
+
+        if not resolved_id:
+            return None
+
+        if resolved_id in self.graph.nodes:
+            return self.graph.nodes[resolved_id]
+
+        meta_lookup = self.metadata.get("defined_mappings", {})
+        return meta_lookup.get(resolved_id)
+
+    def get_contextual_neighbors(self, fn_id, depth=2, file_hint=None):
+        resolved_id = fn_id
+        if "::" not in fn_id:
+            resolved_id = self.resolve_function_name(fn_id, file_hint=file_hint)
+
+        if not resolved_id or resolved_id not in self.graph:
+            return []
+
+        visited = {resolved_id}
+        frontier = {resolved_id}
+
+        for _ in range(depth):
+            next_frontier = set()
+            for node in frontier:
+                next_frontier.update(set(self.graph.successors(node)))
+                next_frontier.update(set(self.graph.predecessors(node)))
+            next_frontier -= visited
+            visited.update(next_frontier)
+            frontier = next_frontier
+
+        visited.remove(resolved_id)
+        return list(visited)
+
+    def fetch_source_snippet(self, fn_id, file_hint=None):
+        meta = self.get_function_metadata(fn_id, file_hint=file_hint)
+        if not meta:
+            return "[Function not found]"
+
+        # Assuming meta['defined_in'] is relative to repo root
+        # But for 'defined_in' we need full content to parse with treesitter to get exact snippet
+        filepath = meta.get("defined_in")
+        content = self.repo.get_file_content(filepath)
+        if not content:
+            return f"[Source file missing: {filepath}]"
+
+        func_name = fn_id.split("::")[-1]
+        if "::" not in fn_id:
+            # Re-resolve to get full name if passed short name
+            resolved = self.resolve_function_name(fn_id, file_hint=file_hint)
+            if resolved: func_name = resolved.split("::")[-1]
+
+        # We need to re-parse to get source_code for the node
+        # Optimization: Store source code or byte offsets in metadata? 
+        # For now, replicate repobrowser logic of re-parsing
+        extension = get_file_extension(filepath)
+        if not extension:
+            extension = guess_extension_from_shebang(file_content=content)
+        
+        lang = get_programming_language(extension)
+        if lang.value not in supported_languages():
+            return "[Language not supported]"
+
+        treesitter = Treesitter.create_treesitter(lang)
+        try:
+            treesitter.parse(content.encode("utf8"))
+            functions = treesitter.get_definitions("function")
+            for func in functions:
+                if func.name == func_name:
+                    return func.source_code
+            return "[Function not located in source]"
+        except Exception as e:
+            return f"[Error reading source: {str(e)}]"
+
+    def lookaround_source_snippet(self, fn_id, context_lines=5, file_hint=None):
+        meta = self.get_function_metadata(fn_id, file_hint=file_hint)
+        if not meta:
+            return "[Function not found]"
+
+        filepath = meta.get("defined_in")
+        content = self.repo.get_file_content(filepath)
+        if not content:
+             return f"[Source file missing: {filepath}]"
+        
+        lines = content.splitlines(keepends=True)
+        func_name = fn_id.split("::")[-1]
+        if "::" not in fn_id:
+            resolved = self.resolve_function_name(fn_id, file_hint=file_hint)
+            if resolved: func_name = resolved.split("::")[-1]
+
+        # Regex search for context
+        for i, line in enumerate(lines):
+            if re.search(rf"\b{re.escape(func_name)}\b", line):
+                start = max(i - context_lines, 0)
+                end = min(i + context_lines + 1, len(lines))
+                return "".join(lines[start:end])
+        return "[Function not located in source]"
+
+
+def create_repograph(root, search=None, save_path="./"):
+    # Backward compatibility wrapper
+    from milo.codesift.repository import get_repository
+    repo = get_repository(root)
+    graph = RepoGraph(repo)
+    graph.build()
+    graph.save(save_path)
 
 
 if __name__ == "__main__":

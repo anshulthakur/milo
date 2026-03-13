@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import traceback
 
-from milo.codesift.repograph import create_repograph, extract_function_calls
+from milo.codesift.repograph import create_repograph
 from milo.agents.codereview import get_agent as get_codereview_agent
 from milo.codesift.parsers.utils import (get_file_extension, get_programming_language, guess_extension_from_shebang)
 from milo.codesift.parsers import supported_languages, Treesitter
