@@ -242,7 +242,7 @@ int main() {
             "import_statement",
             "import_statement",
             "import_statement",
-            "expression_statement",
+            "assignment",
             "function_definition",
             "class_definition",
             "decorated_definition",

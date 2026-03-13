@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 from milo.codesift.repograph import create_repograph
-from milo.codesift.repobrowser import CallFlowAnalyzer, load_repo_graph
+from milo.codesift.repobrowser import CallFlowAnalyzer, load_repo_graph, resolve_function_name, fetch_source_snippet
 
 class TestCallFlowAnalyzer(unittest.TestCase):
     
@@ -230,6 +230,48 @@ if __name__ == "__main__":
         # Test flow for subdir/file6.py::main
         main_py_flow = all_flows.get('subdir/file6.py::main')
         self.assertTrue(any('subdir/file6.py::another_function' in path for path in main_py_flow))
+
+class TestRepoBrowserResolution(TestCallFlowAnalyzer):
+    """
+    Tests for name resolution and snippet fetching with file hints.
+    Inherits setup from TestCallFlowAnalyzer to reuse file creation logic.
+    """
+    
+    def test_resolve_function_name_exact(self):
+        # Exact fully qualified name should always resolve
+        res = resolve_function_name("file1.py::my_function", {"lookup": self.G.graph["lookup"]})
+        self.assertEqual(res, "file1.py::my_function")
+
+    def test_resolve_function_name_short(self):
+        # Short name unique in the repo
+        res = resolve_function_name("my_function", {"lookup": self.G.graph["lookup"]})
+        self.assertEqual(res, "file1.py::my_function")
+
+    def test_resolve_function_name_method_short(self):
+        # Method name without class prefix (indexed by new repograph logic)
+        res = resolve_function_name("greet", {"lookup": self.G.graph["lookup"]})
+        self.assertEqual(res, "file1.py::MyClass.greet")
+
+    def test_resolve_function_name_with_hint(self):
+        # Ambiguous name handling (simulated or real)
+        # 'main' exists in file2.c, file5.c, file8.c, subdir/file6.py
+        
+        # Without hint, it should be ambiguous (return None)
+        res = resolve_function_name("main", {"lookup": self.G.graph["lookup"]})
+        self.assertIsNone(res)
+        
+        # With hint, it should resolve to the specific file
+        res_c = resolve_function_name("main", {"lookup": self.G.graph["lookup"]}, file_hint="file2.c")
+        self.assertEqual(res_c, "file2.c::main")
+        
+        res_py = resolve_function_name("main", {"lookup": self.G.graph["lookup"]}, file_hint="subdir/file6.py")
+        self.assertEqual(res_py, "subdir/file6.py::main")
+
+    def test_fetch_source_with_hint(self):
+        # Verify fetch_source_snippet passes the hint through
+        snippet = fetch_source_snippet("main", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c")
+        self.assertIn('function1(5, "hello");', snippet)
+        self.assertNotIn('pthread_create', snippet)
 
 if __name__ == '__main__':
     unittest.main()
