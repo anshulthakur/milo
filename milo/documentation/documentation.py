@@ -18,6 +18,7 @@ class InputCode(BaseModel):
     language: str
     method: str
     docstring: str = ""
+    file_path: Optional[str] = None
     request: str = ("Please revise the docstring for the provided method. "
                     "Return the result in JSON format using the schema provided. "
                     "Use tools to fetch further context from the repository graph to ensure documentation relevance. ")
@@ -154,12 +155,21 @@ def remove_existing_docstring_python(file_content: str, tree, method_node, langu
     comment_node = None
     if node.type in ("function_definition", "class_definition"):
         body = node.child_by_field_name("body")
-        if body and body.named_child_count > 0:
-            first_statement = body.named_children[0]
-            if first_statement.type == "expression_statement" and first_statement.named_child_count > 0:
-                child = first_statement.named_children[0]
-                if child.type == "string":
-                    comment_node = first_statement
+        if body:
+            for child in body.children:
+                if child.type == "comment":
+                    continue
+                
+                if child.type == "expression_statement":
+                    for grandchild in child.children:
+                        if grandchild.type == "string":
+                            comment_node = child
+                            break
+                elif child.type == "string":
+                    comment_node = child
+                
+                # We only check the first non-comment statement
+                break
 
     if comment_node:
         #print(comment_node.text.decode())
@@ -353,6 +363,11 @@ def run_comb(repo_root = None, repo_name = None, files: List[str] = []):
         if len(file_extension) == 0:
             file_extension = guess_extension_from_shebang(file_path=local_path)
         programming_language = get_programming_language(file_extension)
+        
+        if repo_root:
+            rel_file_path = os.path.relpath(local_path, repo_root)
+        else:
+            rel_file_path = os.path.basename(local_path)
 
         file_content = None
         try:
@@ -375,7 +390,8 @@ def run_comb(repo_root = None, repo_name = None, files: List[str] = []):
                     try:
                         user_prompt = InputCode(language = programming_language.value, 
                                     method=method_source_code, 
-                                    docstring = method_comment or "")
+                                    docstring = method_comment or "",
+                                    file_path=rel_file_path)
             
                         agent.clear_history()
                         agent.set_format(CommentedCode.model_json_schema())

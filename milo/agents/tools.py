@@ -37,6 +37,7 @@ class Tool:
 
 class FetchSourceArgs(BaseModel):
     fn_name: str = Field(..., description="The function name to fetch source for")
+    file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
 class LookaroundSourceArgs(BaseModel):
@@ -44,15 +45,18 @@ class LookaroundSourceArgs(BaseModel):
     context_lines: Optional[int] = Field(
         5, description="Number of lines of context around the function"
     )
+    file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
 class GetMetadataArgs(BaseModel):
     fn_name: str = Field(..., description="The function name to fetch metadata for")
+    file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
 class GetNeighborsArgs(BaseModel):
     fn_name: str = Field(..., description="The function name to find neighbors for")
     depth: Optional[int] = Field(2, description="Depth to traverse callers and callees")
+    file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
 class GrepContext(BaseModel):

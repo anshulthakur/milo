@@ -337,6 +337,16 @@ class RepoGraph:
             shortname = fn_id.split("::")[-1]
             defined_mappings[fn_id] = meta
             lookup[shortname].append(fn_id)
+            
+            # Also index the full ID to support exact match resolution
+            if fn_id not in lookup[fn_id]:
+                lookup[fn_id].append(fn_id)
+
+            # Index method shortnames (e.g. 'greet' for 'MyClass.greet')
+            if "." in shortname:
+                method_name = shortname.split(".")[-1]
+                if method_name != shortname and fn_id not in lookup[method_name]:
+                    lookup[method_name].append(fn_id)
 
         for shortname, third_meta in third_party.items():
             third_party_mappings[shortname] = {

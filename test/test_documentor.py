@@ -9,6 +9,7 @@ from milo.documentation.documentation import (
     insert_docstring_c,
     sanitize_docstring_python,
     locate_node_by_name,
+    InputCode,
     update_docstring,
     CommentedCode,
 )
@@ -156,6 +157,14 @@ void my_func() {
         self.assertIn("/** New docstring */", new_content)
         self.assertNotIn("Old docstring", new_content)
 
+    def test_input_code_model_fields(self):
+        """Test that InputCode model accepts file_path."""
+        input_obj = InputCode(language="python", method="def foo(): pass", file_path="src/foo.py")
+        self.assertEqual(input_obj.file_path, "src/foo.py")
+        
+        # Test optionality
+        input_obj_none = InputCode(language="python", method="def foo(): pass")
+        self.assertIsNone(input_obj_none.file_path)
 
 if __name__ == '__main__':
     unittest.main()

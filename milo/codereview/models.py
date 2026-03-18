@@ -31,6 +31,7 @@ class InputCode(BaseModel):
     language: str
     method: str
     docstring: str = ""
+    file_path: Optional[str] = None
     request: str = ("Please revise the docstring for the provided method. "
                     "Return the result in JSON format using the schema provided. "
                     "Use tools to fetch further context from the repository graph to ensure documentation relevance. ")

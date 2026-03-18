@@ -11,6 +11,7 @@ from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
 from unittest.mock import patch, MagicMock
 from milo.codereview.codereview import run_crab
+from milo.agents.tools import FetchSourceArgs, GetMetadataArgs
 from milo.codereview.models import CodeReview, DefectEnum
 
 
@@ -435,6 +436,19 @@ class TestCrabIntegration(unittest.TestCase):
         self.assertEqual(len(reviews), 1)
         self.assertEqual(reviews[0].anchor.symbol_name, "main")
         self.assertIn("Staged change issue", reviews[0].conversation[0].content)
+
+    def test_tool_arguments_support_file_path(self):
+        """
+        Verify that the tool argument models used by the agent have been updated
+        to support file_path/file_hint.
+        """
+        # FetchSourceArgs
+        args = FetchSourceArgs(fn_name="main", file_path="app.py")
+        self.assertEqual(args.file_path, "app.py")
+
+        # GetMetadataArgs
+        meta_args = GetMetadataArgs(fn_name="main", file_path="app.py")
+        self.assertEqual(meta_args.file_path, "app.py")
 
 if __name__ == '__main__':
     unittest.main()

@@ -40,6 +40,7 @@ class TreesitterPython(Treesitter):
             "expression_statement",
             "decorated_definition",
             "if_statement",
+            "assignment",
         }
 
         for node in self.tree.root_node.children:

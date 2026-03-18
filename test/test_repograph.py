@@ -244,5 +244,19 @@ if __name__ == "__main__":
         self.assertIn("file2.c::main", neighbors)
         self.assertIn("file3.h::inline_function", neighbors)
 
+    def test_lookup_short_method_names(self):
+        """
+        Test that class methods are indexed by their short name (without class prefix)
+        to support tool usage where agents might not know the class name.
+        """
+        lookup = self.metadata["lookup"]
+        # 'greet' is a method of MyClass in file1.py (file1.py::MyClass.greet)
+        # It should be indexed under 'greet' as well as 'MyClass.greet'
+        self.assertIn("greet", lookup)
+        self.assertIn("file1.py::MyClass.greet", lookup["greet"])
+        
+        # Verify 'MyClass.greet' is also a key
+        self.assertIn("MyClass.greet", lookup)
+
 if __name__ == '__main__':
     unittest.main()

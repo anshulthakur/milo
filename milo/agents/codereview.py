@@ -78,42 +78,45 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
             build_tool(
                 "fetch_source_snippet",
                 "Fetch the source code implementation of a function from the repo.",
-                LookaroundSourceArgs,
-                lambda fn_name: fetch_source_snippet(
-                    fn_id=fn_name, G=G, metadata=metadata, repo_path=repo_path
+                FetchSourceArgs,
+                lambda fn_name, file_path=None: fetch_source_snippet(
+                    fn_id=fn_name, G=G, metadata=metadata, repo_path=repo_path, file_hint=file_path
                 ),
             ),
             build_tool(
                 "get_function_metadata",
                 "Retrieve structured metadata (like callers, callees, arguments, and file path) for a function.",
                 GetMetadataArgs,
-                lambda fn_name: get_function_metadata(
+                lambda fn_name, file_path=None: get_function_metadata(
                     G=G,
                     fn_id=fn_name,
                     metadata=metadata,
+                    file_hint=file_path,
                 ),
             ),
             build_tool(
                 "get_contextual_neighbors",
                 "Find functions that are callers or callees within a given depth from a function.",
                 GetNeighborsArgs,
-                lambda fn_name, depth=2: get_contextual_neighbors(
+                lambda fn_name, depth=2, file_path=None: get_contextual_neighbors(
                     G=G,
                     fn_id=fn_name,
                     depth=depth,
                     metadata=metadata,
+                    file_hint=file_path,
                 ),
             ),
             build_tool(
                 "lookaround_source_snippet",
                 "Fetch the source code around a function definition.",
                 FetchSourceArgs,
-                lambda fn_name, context_lines=5: lookaround_source_snippet(
+                lambda fn_name, context_lines=5, file_path=None: lookaround_source_snippet(
                     fn_id=fn_name,
                     G=G,
                     metadata=metadata,
                     context_lines=context_lines,
                     repo_path=repo_path,
+                    file_hint=file_path,
                 ),
             ),
             build_tool(
