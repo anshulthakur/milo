@@ -2,6 +2,7 @@ import unittest
 import networkx as nx
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from milo.codesift.repograph import create_repograph
 from milo.codesift.repobrowser import CallFlowAnalyzer, load_repo_graph, resolve_function_name, fetch_source_snippet
@@ -272,6 +273,34 @@ class TestRepoBrowserResolution(TestCallFlowAnalyzer):
         snippet = fetch_source_snippet("main", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c")
         self.assertIn('function1(5, "hello");', snippet)
         self.assertNotIn('pthread_create', snippet)
+
+class TestCallFlowAnalyzerGit(TestCallFlowAnalyzer):
+    def setUp(self):
+        self.base_tmp = Path("/tmp").resolve()
+        self.test_repo_path = self.base_tmp / "test_repo_browser_git"
+        self.output_path = self.base_tmp / "test_repobrowser_output_git"
+        
+        if self.test_repo_path.exists():
+            shutil.rmtree(self.test_repo_path)
+        self.create_test_files(self.test_repo_path)
+
+        subprocess.check_call(['git', 'init'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'config', 'user.email', 'test@example.com'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'config', 'user.name', 'Test User'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'add', '.'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'commit', '-m', 'Initial commit'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+
+        if self.output_path.exists():
+            shutil.rmtree(self.output_path)
+        self.output_path.mkdir(parents=True, exist_ok=True)
+
+        create_repograph(str(self.test_repo_path), save_path=str(self.output_path))
+        
+        self.G, _ = load_repo_graph(json_path=str(self.output_path / "metadata.json"))
+        self.analyzer = CallFlowAnalyzer(self.G)
+
+class TestRepoBrowserResolutionGit(TestRepoBrowserResolution, TestCallFlowAnalyzerGit):
+    pass
 
 if __name__ == '__main__':
     unittest.main()

@@ -9,17 +9,17 @@ from milo.agents.codereview import get_agent as get_codereview_agent
 from milo.codesift.parsers.utils import (get_file_extension, get_programming_language, guess_extension_from_shebang)
 from milo.codesift.parsers import supported_languages, Treesitter
 from milo.codereview.models import ReviewListModel, ReviewInputCode
-from milo.codereview.diff import VCSProvider, DiffUtils
+from milo.codereview.diff import DiffUtils
+from milo.utils.vcs import FileManager
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 
-def run_crab(vcs: Optional[VCSProvider] = None, repo_root: Optional[str] = None, files: List[str] = None, review_staged: bool = False) -> None:
+def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str] = None, files: List[str] = None, review_staged: bool = False) -> None:
     """
     Main entry point for CRAB (Comment Review and Aggregation Bot).
-    Orchestrates the review process using VCS, State Store, and Agents.
+    Orchestrates the review process using file managers, State Store, and Agents.
     """
-    if not repo_root and vcs:
-        # If using VCS, assume repo_root is managed by it or passed explicitly
-        pass
+    if not repo_root and file_manager:
+        repo_root = file_manager.repo_root
     elif not repo_root:
         # Fallback for standalone mode
         repo_root = os.getcwd()
@@ -31,78 +31,56 @@ def run_crab(vcs: Optional[VCSProvider] = None, repo_root: Optional[str] = None,
     repomap_path = None
     if repo_root:
         repomap_path = os.path.join(repo_root, '.milo')
-        Path(repomap_path).mkdir(exist_ok=True)
+        Path(repomap_path).mkdir(parents=True, exist_ok=True)
     else:
         repomap_path = os.path.join('/tmp', 'milo')
-        Path(repomap_path).mkdir(exist_ok=True)
+        Path(repomap_path).mkdir(parents=True, exist_ok=True)
     
     review_store = ReviewStore(Path(repomap_path) / "reviews.json")
     
     # 2. Generate/Load Repograph for Context
     # We create it fresh to ensure we have the latest context
-    create_repograph(root=str(repo_root), save_path=repomap_path)
+    if repo_root:
+        create_repograph(root=str(repo_root), save_path=repomap_path)
     metadata_path = os.path.join(repomap_path, "metadata.json")
 
     # 3. Initialize Agent
     agent = get_codereview_agent(metadata_path=metadata_path, repo_path=repo_root)
 
     # 4. Determine Changes to Review
-    if vcs:
-        if review_staged:
-            # Scenario C: Review staged changes against HEAD
-            base_rev = vcs.get_current_rev()
-            head_rev = 'index'
-        else:
-            # Scenario B: Git Repository Review (committed changes)
-            # We assume we are reviewing changes between HEAD and its parent (or a base branch)
-            # For simplicity, let's diff against HEAD~1 if not specified
-            # In a real CI env, these would be arguments.
-            head_rev = vcs.get_current_rev()
-            base_rev = f"{head_rev}~1" # Default to previous commit
-        
-        patch_set = vcs.get_changes(base_rev, head_rev)
-        
-        for patched_file in patch_set:
-            file_path = patched_file.path
-            full_path = os.path.join(repo_root, file_path)
-            
-            # Skip deletions
-            if patched_file.is_removed_file:
-                continue
+    if not file_manager:
+        print("No file manager supplied. Cannot determine changes.")
+        return
 
-            # Parse the NEW file content to map hunks to symbols
-            file_content = vcs.get_file_content(file_path, head_rev)
-            if not file_content:
-                continue
-                
-            process_file_changes(
-                file_path=file_path,
-                file_content=file_content,
-                hunks=patched_file,
-                review_store=review_store,
-                agent=agent,
-                repo_root=repo_root
-            )
-            
+    if review_staged:
+        # Scenario C: Review staged changes against HEAD
+        base_rev = file_manager.get_current_rev()
+        head_rev = 'index'
     else:
-        # Scenario A: Standalone Review
-        # Iterate over provided files, treat everything as "new" but check against state
-        for file_path in files:
-            try:
-                with open(file_path, 'r') as f:
-                    content = f.read()
-                
-                # In standalone mode, we don't have diff hunks. 
-                # We review the whole file's symbols if they changed.
-                process_file_symbols(
-                    file_path=file_path,
-                    file_content=content,
-                    review_store=review_store,
-                    agent=agent,
-                    repo_root=repo_root
-                )
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
+        # Scenario B: Git Repository Review (committed changes) or Standalone Review
+        head_rev = file_manager.get_current_rev()
+        base_rev = f"{head_rev}~1" if head_rev != "HEAD" else "HEAD"
+    
+    patch_set = file_manager.get_changes(base_rev, head_rev)
+    
+    for patched_file in patch_set:
+        file_path = patched_file.path
+        
+        if patched_file.is_removed_file:
+            continue
+
+        file_content = file_manager.get_file_content(file_path, head_rev)
+        if not file_content:
+            continue
+            
+        process_file_changes(
+            file_path=file_path,
+            file_content=file_content,
+            hunks=patched_file,
+            review_store=review_store,
+            agent=agent,
+            repo_root=repo_root
+        )
 
 def process_file_changes(file_path, file_content, hunks, review_store, agent, repo_root):
     """
@@ -181,43 +159,6 @@ def process_file_changes(file_path, file_content, hunks, review_store, agent, re
                 line_range=(matched_def.node.start_point[0] + 1, matched_def.node.end_point[0] + 1),
                 hunk=hunk
             )
-
-def process_file_symbols(file_path, file_content, review_store, agent, repo_root):
-    """
-    Standalone mode: iterates all symbols and checks for changes.
-    """
-    extension = get_file_extension(file_path)
-    lang = get_programming_language(extension)
-    if lang.value not in supported_languages():
-        return
-
-    treesitter = Treesitter.create_treesitter(lang)
-    treesitter.parse(file_content.encode('utf-8'))
-    definitions = treesitter.get_definitions("function")
-
-    for definition in definitions:
-        symbol_name = definition.name
-        symbol_code = definition.source_code
-        ast_fingerprint = DiffUtils.compute_ast_fingerprint(definition.node)
-        
-        existing_review = review_store.find_matching_review(file_path, symbol_name)
-        
-        if existing_review and existing_review.anchor.ast_fingerprint == ast_fingerprint:
-            continue
-            
-        # If changed or new, review it
-        perform_review(
-            agent=agent,
-            lang=lang.value,
-            code=symbol_code,
-            file_path=file_path,
-            symbol_name=symbol_name,
-            history=existing_review.conversation if existing_review else [],
-            review_store=review_store,
-            patch_fingerprint="standalone_no_diff",
-            ast_fingerprint=ast_fingerprint,
-            line_range=(definition.node.start_point[0] + 1, definition.node.end_point[0] + 1)
-        )
 
 def perform_review(agent, lang, code, file_path, symbol_name, history, review_store, patch_fingerprint, ast_fingerprint, line_range, hunk=None):
     try:

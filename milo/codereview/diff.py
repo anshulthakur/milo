@@ -1,84 +1,8 @@
 import hashlib
 import os
 from typing import List, Optional
-from abc import ABC, abstractmethod
-from git import Repo, GitCommandError
-from unidiff import PatchSet, PatchedFile, Hunk
+from unidiff import Hunk
 from tree_sitter import Node
-
-class VCSProvider(ABC):
-    """
-    Abstract base class for Version Control System providers.
-    Allows plugging in Local Git, GitLab, GitHub, etc.
-    """
-    @abstractmethod
-    def get_changes(self, base_ref: str, head_ref: str) -> PatchSet:
-        pass
-
-    @abstractmethod
-    def get_file_content(self, file_path: str, ref: str) -> Optional[str]:
-        pass
-
-    @abstractmethod
-    def get_current_rev(self) -> str:
-        pass
-
-class LocalGitProvider(VCSProvider):
-    """
-    Implementation of VCSProvider for a local git repository.
-    """
-    def __init__(self, repo_path: str, search_parent_directories: bool = True):
-        try:
-            self.repo = Repo(repo_path, search_parent_directories=search_parent_directories)
-            self.repo_root = self.repo.git.rev_parse("--show-toplevel")
-        except Exception as e:
-            raise ValueError(f"Invalid git repository at {repo_path}: {e}")
-
-    def get_changes(self, base_ref: str, head_ref: str) -> PatchSet:
-        try:
-            if head_ref == 'index':
-                diff_text = self.repo.git.diff(
-                    base_ref,
-                    '--cached',
-                    '--src-prefix=a/',
-                    '--dst-prefix=b/',
-                    ignore_blank_lines=True,
-                    ignore_space_at_eol=True,
-                    unified=3
-                )
-            else:
-                diff_text = self.repo.git.diff(
-                    base_ref,
-                    head_ref,
-                    '--src-prefix=a/',
-                    '--dst-prefix=b/',
-                    ignore_blank_lines=True,
-                    ignore_space_at_eol=True,
-                    unified=3
-                )
-            return PatchSet(diff_text)
-        except GitCommandError as e:
-            print(f"Git error extracting diff: {e}")
-            return PatchSet("")
-
-    def get_file_content(self, file_path: str, ref: str) -> Optional[str]:
-        try:
-            if os.path.isabs(file_path):
-                file_path = os.path.relpath(file_path, self.repo.working_dir)
-
-            if ref == 'index':
-                ref_spec = f":0:{file_path}"
-            else:
-                ref_spec = f"{ref}:{file_path}"
-            
-            # GitPython strips trailing newlines by default. We must explicitly disable this.
-            return self.repo.git.show(ref_spec, strip_newline_in_stdout=False)
-
-        except (GitCommandError, KeyError):
-            return None
-
-    def get_current_rev(self) -> str:
-        return self.repo.head.commit.hexsha
 
 class DiffUtils:
     """

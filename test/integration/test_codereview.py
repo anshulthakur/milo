@@ -5,7 +5,8 @@ import unittest
 from git import Repo
 from pathlib import Path
 from unidiff import PatchSet, Hunk
-from milo.codereview.diff import LocalGitProvider, DiffUtils
+from milo.codereview.diff import DiffUtils
+from milo.utils.vcs import LocalGitProvider, FileSystemProvider
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
@@ -54,8 +55,8 @@ class TestCrabIntegration(unittest.TestCase):
         self.repo.index.commit("Add insecure password")
 
         # 2. Run CRAB in git mode. This will populate the review store.
-        vcs_provider = LocalGitProvider(str(self.repo_path))
-        run_crab(vcs=vcs_provider, repo_root=str(self.repo_path))
+        file_manager = LocalGitProvider(str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
         
         # 3. Load the review store to inspect the saved comments
         review_store_path = self.repo_path / ".milo" / "reviews.json"
@@ -119,7 +120,8 @@ def connect_db():
         files_to_review = [str(c_file), str(py_file)]
         
         print("\n--- Running CRAB E2E Standalone (Mixed Languages) ---")
-        run_crab(vcs=None, repo_root=str(standalone_dir), files=files_to_review)
+        file_manager = FileSystemProvider(str(standalone_dir))
+        run_crab(file_manager=file_manager, repo_root=str(standalone_dir), files=files_to_review)
         
         # 5. Load and inspect ReviewStore
         review_store_path = standalone_dir / ".milo" / "reviews.json"

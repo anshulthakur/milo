@@ -1,5 +1,6 @@
 import unittest
 import shutil
+import subprocess
 from pathlib import Path
 from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
@@ -186,6 +187,19 @@ int main() {
                 print(f"Expected: {repr(expected_text)}")
                 print(f"Actual:   {repr(actual_text)}")
             self.assertEqual(actual_text, expected_text)
+
+class TestTreesitterGit(TestTreesitter):
+    def setUp(self):
+        self.test_repo_path = Path('/tmp/test_repo_ts_git').resolve()
+        if self.test_repo_path.exists():
+            shutil.rmtree(self.test_repo_path)
+        self.create_test_files(self.test_repo_path)
+        
+        subprocess.check_call(['git', 'init'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'config', 'user.email', 'test@example.com'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'config', 'user.name', 'Test User'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'add', '.'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'commit', '-m', 'Initial commit'], cwd=str(self.test_repo_path), stdout=subprocess.DEVNULL)
 
     def test_c_dynamic_entry_points(self):
         # Test for file8.c

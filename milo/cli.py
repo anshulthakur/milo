@@ -2,12 +2,10 @@ import argparse
 import sys
 import os
 from milo.codereview import review_path
-from milo.utils.git_tools import get_git_root, get_changed_files
-from milo.utils.path_utils import get_all_files
+from milo.utils.vcs import get_git_root, LocalGitProvider, FileSystemProvider
 
 from milo.documentation.documentation import run_comb
 from milo.codereview.codereview import run_crab
-from milo.codereview.diff import LocalGitProvider
 
 def crab_main():
     parser = argparse.ArgumentParser(description='Comment Review and Aggregation Bot (CRAB)')
@@ -25,20 +23,21 @@ def crab_main():
     repo_name = git_root.split('/')[-1] if git_root is not None else None
     files_to_review = []
 
-    vcs_provider = None
+    file_manager = None
 
     if git_root:
         print(f"Git repository detected at: {git_root}")
-        vcs_provider = LocalGitProvider(git_root)
+        file_manager = LocalGitProvider(git_root)
         if args.updates:
             print(f"Looking for updates in {target_path}...")
-            files_to_review = get_changed_files(git_root, target_path)
+            files_to_review = file_manager.get_changed_files(target_path)
         else:
             print(f"Constructing list of files from {target_path}...")
-            files_to_review = get_all_files(target_path)
+            files_to_review = file_manager.get_all_files(target_path)
     else:
         print(f"No git repository detected. Processing path: {target_path}")
-        files_to_review = get_all_files(target_path)
+        file_manager = FileSystemProvider(target_path)
+        files_to_review = file_manager.get_all_files(target_path)
         if os.path.isdir(target_path):
             git_root = target_path
             repo_name = os.path.basename(target_path)
@@ -48,7 +47,7 @@ def crab_main():
     else:
         print(f"Found {len(files_to_review)} files to process.")
         run_crab(
-            vcs=vcs_provider,
+            file_manager=file_manager,
             repo_root=git_root,
             files=files_to_review,
             review_staged=args.updates
@@ -69,18 +68,21 @@ def comb_main():
     git_root = get_git_root(target_path)
     repo_name = git_root.split('/')[-1] if git_root is not None else None
     files_to_document = []
+    file_manager = None
 
     if git_root:
         print(f"Git repository detected at: {git_root}")
+        file_manager = LocalGitProvider(git_root)
         if args.updates:
             print(f"Looking for updates in {target_path}...")
-            files_to_document = get_changed_files(git_root, target_path)
+            files_to_document = file_manager.get_changed_files(target_path)
         else:
             print(f"Constructing list of files from {target_path}...")
-            files_to_document = get_all_files(target_path)
+            files_to_document = file_manager.get_all_files(target_path)
     else:
         print(f"No git repository detected. Processing path: {target_path}")
-        files_to_document = get_all_files(target_path)
+        file_manager = FileSystemProvider(target_path)
+        files_to_document = file_manager.get_all_files(target_path)
         if os.path.isdir(target_path):
             git_root = target_path
             repo_name = os.path.basename(target_path)

@@ -61,9 +61,9 @@ class GetNeighborsArgs(BaseModel):
 
 class GrepContext(BaseModel):
     query: str = Field(..., description="String query to search for in the codebase")
-    filename: Optional[str] = Field(
-        ...,
-        description="Optional file name in which search to be done."
+    file_path: Optional[str] = Field(
+        None,
+        description="Optional file path in which search to be done."
         " If not specified, search done on entire codebase",
     )
 

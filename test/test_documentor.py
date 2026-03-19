@@ -166,5 +166,11 @@ void my_func() {
         input_obj_none = InputCode(language="python", method="def foo(): pass")
         self.assertIsNone(input_obj_none.file_path)
 
+class TestDocstringManipulationGit(TestDocstringManipulation):
+    def setUp(self):
+        self.tmp_dir = Path('/tmp/doc_tests_git').resolve()
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call(['git', 'init'], cwd=str(self.tmp_dir), stdout=subprocess.DEVNULL)
+
 if __name__ == '__main__':
     unittest.main()

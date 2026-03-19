@@ -2,6 +2,7 @@ import unittest
 import os
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from milo.codesift.repograph import create_repograph
 from milo.codesift.repobrowser import load_repo_graph, get_contextual_neighbors, fetch_source_snippet
@@ -257,6 +258,25 @@ if __name__ == "__main__":
         
         # Verify 'MyClass.greet' is also a key
         self.assertIn("MyClass.greet", lookup)
+
+class TestRepographGit(TestRepograph):
+    @classmethod
+    def setUpClass(cls):
+        cls.test_repo_path = Path('/tmp/test_repo_git').resolve()
+        cls.save_path = Path('/tmp/test_repograph_git').resolve()
+        cls.save_path.mkdir(exist_ok=True)
+        if cls.test_repo_path.exists():
+            shutil.rmtree(cls.test_repo_path)
+        cls.create_test_files(cls.test_repo_path)
+        
+        subprocess.check_call(['git', 'init'], cwd=str(cls.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'config', 'user.email', 'test@example.com'], cwd=str(cls.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'config', 'user.name', 'Test User'], cwd=str(cls.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'add', '.'], cwd=str(cls.test_repo_path), stdout=subprocess.DEVNULL)
+        subprocess.check_call(['git', 'commit', '-m', 'Initial commit'], cwd=str(cls.test_repo_path), stdout=subprocess.DEVNULL)
+        
+        create_repograph(str(cls.test_repo_path), save_path=str(cls.save_path))
+        cls.G, cls.metadata = load_repo_graph(str(cls.save_path / "metadata.json"))
 
 if __name__ == '__main__':
     unittest.main()

@@ -11,6 +11,7 @@ import traceback
 from milo.codesift.parsers import supported_languages, Treesitter
 from milo.codesift.repograph import create_repograph
 from milo.codesift.parsers.utils import get_programming_language, get_file_extension, guess_extension_from_shebang
+from milo.utils.vcs import FileManager
 
 from milo.agents.documentation import get_agent as get_documentation_agent
 
@@ -313,7 +314,13 @@ def update_docstring(local_path, programming_language, node, comment):
         with open(local_path, "w", encoding="utf-8") as f:
             f.write(updated_content)
 
-def run_comb(repo_root = None, repo_name = None, files: List[str] = []):
+def run_comb(file_manager: Optional[FileManager] = None, repo_root: Optional[str] = None, repo_name: Optional[str] = None, files: List[str] = None):
+    if files is None:
+        files = []
+        
+    if not repo_root and file_manager:
+        repo_root = file_manager.repo_root
+
     files_to_document = set()
     for path_str in files:
         path = Path(path_str).resolve()

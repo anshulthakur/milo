@@ -5,7 +5,8 @@ import unittest
 from git import Repo
 from pathlib import Path
 from unidiff import PatchSet, Hunk
-from milo.codereview.diff import LocalGitProvider, DiffUtils
+from milo.codereview.diff import DiffUtils
+from milo.utils.vcs import LocalGitProvider, FileSystemProvider
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
@@ -255,6 +256,30 @@ class TestLocalGitProvider(unittest.TestCase):
         content_abs = provider.get_file_content(str(self.file_path), 'index')
         self.assertEqual(content_abs, "line1\nline2\n")
 
+class TestFileSystemProvider(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = Path('/tmp/fs_provider_test').resolve()
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+        self.tmp_dir.mkdir(parents=True)
+        self.file_path = self.tmp_dir / "test.txt"
+
+    def tearDown(self):
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+
+    def test_get_changes(self):
+        with open(self.file_path, 'w') as f:
+            f.write("line1\nline2\n")
+        
+        provider = FileSystemProvider(str(self.tmp_dir))
+        changes = provider.get_changes("HEAD~1", "HEAD")
+        self.assertEqual(len(changes), 1)
+        self.assertTrue(changes[0].path.endswith("test.txt"))
+        
+        hunk = changes[0][0]
+        self.assertTrue(any("line1" in line.value for line in hunk if line.is_added))
+
 class TestCrabIntegration(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = Path('/tmp/crab_integration_test').resolve()
@@ -310,8 +335,8 @@ class TestCrabIntegration(unittest.TestCase):
         self.repo.index.commit("Second commit")
 
         # 3. Run CRAB in git mode
-        vcs_provider = LocalGitProvider(str(self.repo_path))
-        run_crab(vcs=vcs_provider, repo_root=str(self.repo_path))
+        file_manager = LocalGitProvider(str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
 
         # 4. Assertions for first run
         mock_agent_instance.call.assert_called_once()
@@ -337,7 +362,7 @@ class TestCrabIntegration(unittest.TestCase):
 
         # 5. Run again. The diff is the same, so the AST fingerprint check should prevent re-review.
         mock_agent_instance.call.reset_mock()
-        run_crab(vcs=vcs_provider, repo_root=str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
         
         # Agent should NOT be called again.
         mock_agent_instance.call.assert_not_called()
@@ -347,7 +372,7 @@ class TestCrabIntegration(unittest.TestCase):
         self.repo.index.add(["app.py"])
         self.repo.index.commit("Third commit")
 
-        run_crab(vcs=vcs_provider, repo_root=str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
         
         # Agent should be called again because AST fingerprint changed.
         mock_agent_instance.call.assert_called_once()
@@ -363,10 +388,11 @@ class TestCrabIntegration(unittest.TestCase):
         # 1. Setup mock agent
         mock_agent_instance = MagicMock()
         mock_get_agent.return_value = mock_agent_instance
+        rel_file_path = self.standalone_file.name
         review_payload = [
             CodeReview(
                 type=DefectEnum.style,
-                file=str(self.standalone_file),
+                file=rel_file_path,
                 line=1,
                 description="Function name too generic",
                 suggestion="Use a more descriptive name"
@@ -374,32 +400,33 @@ class TestCrabIntegration(unittest.TestCase):
         ]
         mock_agent_instance.call.return_value = json.dumps(review_payload)
 
+        file_manager = FileSystemProvider(str(self.standalone_path))
         # 2. Run CRAB in standalone mode for the first time
-        run_crab(vcs=None, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
+        run_crab(file_manager=file_manager, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
 
         # 3. Assertions
         mock_agent_instance.call.assert_called_once()
         review_store_path = self.standalone_path / ".milo" / "reviews.json"
         self.assertTrue(review_store_path.exists())
         store = ReviewStore(review_store_path)
-        reviews = store.get_reviews_by_file(str(self.standalone_file))
+        reviews = store.get_reviews_by_file(rel_file_path)
         self.assertEqual(len(reviews), 1)
         self.assertEqual(reviews[0].anchor.symbol_name, "process_data")
         original_ast_fingerprint = reviews[0].anchor.ast_fingerprint
 
         # 4. Run again without changes
         mock_agent_instance.call.reset_mock()
-        run_crab(vcs=None, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
+        run_crab(file_manager=file_manager, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
         mock_agent_instance.call.assert_not_called()
 
         # 5. Modify the file and run again
         self.standalone_file.write_text("def process_data():\n    # changed\n    return 2\n")
-        run_crab(vcs=None, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
+        run_crab(file_manager=file_manager, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
         mock_agent_instance.call.assert_called_once()
 
         # Check that the review was updated
         store.load()
-        updated_reviews = store.get_reviews_by_file(str(self.standalone_file))
+        updated_reviews = store.get_reviews_by_file(rel_file_path)
         self.assertEqual(len(updated_reviews), 1)
         self.assertNotEqual(original_ast_fingerprint, updated_reviews[0].anchor.ast_fingerprint)
 
@@ -424,8 +451,8 @@ class TestCrabIntegration(unittest.TestCase):
         self.repo.index.add(["app.py"])
 
         # 3. Run CRAB in staged mode
-        vcs_provider = LocalGitProvider(str(self.repo_path))
-        run_crab(vcs=vcs_provider, repo_root=str(self.repo_path), review_staged=True)
+        file_manager = LocalGitProvider(str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path), review_staged=True)
 
         # 4. Assertions
         mock_agent_instance.call.assert_called_once()

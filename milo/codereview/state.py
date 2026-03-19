@@ -111,7 +111,7 @@ class ReviewStore:
             results = [r for r in results if r.status == status]
         return results
     
-    def find_matching_review(self, file_path: str, symbol_name: str) -> Optional[Review]:
+    def find_matching_review(self, file_path: str, symbol_name: Optional[str]) -> Optional[Review]:
         """
         Finds an existing OPEN review that matches the file and symbol name.
         This is the core logic for 'Phase 1: Robust Diff & Anchoring'.
