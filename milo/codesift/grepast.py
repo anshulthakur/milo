@@ -3,6 +3,7 @@ from grep_ast.grep_ast import TreeContext
 
 from pathlib import Path
 import pathspec
+import traceback
 
 
 def lookup_file(filename, pattern, options=None):
@@ -53,42 +54,48 @@ def grep_ast(
     query: str,
     file_hint=None,
     repo_path="",
-) -> str | None:
+) -> dict | None:
     """
     Recursively searches for a string pattern in files within a repository, respecting .gitignore exclusions.
 
     Args:
         query (str): String pattern to search for in file contents.
         file_hint: Unused parameter (present in signature but not implemented in current logic).
-        repo_path (str, optional): Root directory path of the repository. If provided, limits search scope to this directory.
+        repo_path (str, optional): Root directory path of the repository. Defaults to current directory.
 
     Returns:
         dict | None: A dictionary with two keys if matches found:
             - "query": The searched string pattern
             - "results": Dictionary mapping filenames to their matched results {filename: [matches]}
-            Returns None only when no files are processed (e.g., invalid repo_path) or no matches found.
+            Returns None if an error occurs.
 
     Behavior:
         1. Loads .gitignore rules from repository root if repo_path is specified
         2. Uses gitwildmatch pattern matching to filter files during recursive search
         3. Aggregates all file matches into a structured dictionary format
-        4. Returns None when results dict is empty (no matches found)
+        4. Returns a dictionary with empty results if no matches are found.
     """
-    gitignore = None
-    if repo_path is not None:
+    try:
+        if not repo_path:
+            repo_path = "."
+
         parent = Path(repo_path).resolve()
+        gitignore = None
         potential_gitignore = parent / ".gitignore"
         if potential_gitignore.exists():
             gitignore = potential_gitignore
 
-    if gitignore:
-        with gitignore.open() as f:
-            spec = pathspec.PathSpec.from_lines("gitwildmatch", f)
-    else:
-        spec = pathspec.PathSpec.from_lines("gitwildmatch", [])
-    results = {}
-    for fname in enumerate_files([parent], spec):
-        matches = lookup_file(fname, query)
-        if matches is not None:
-            results.update({fname: matches})
-    return {"query": query, "results": results}
+        if gitignore:
+            with gitignore.open() as f:
+                spec = pathspec.PathSpec.from_lines("gitwildmatch", f)
+        else:
+            spec = pathspec.PathSpec.from_lines("gitwildmatch", [])
+        results = {}
+        for fname in enumerate_files([parent], spec):
+            matches = lookup_file(fname, query)
+            if matches is not None:
+                results.update({fname: matches})
+        return {"query": query, "results": results}
+    except Exception:
+        traceback.print_exc()
+        return None

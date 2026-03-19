@@ -58,8 +58,8 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
                 "grep_keyword",
                 "Fetches various instances where keyword is used across the codebase in a grep-like manner",
                 GrepContext,
-                lambda query, filename=None: grep_ast(query = query,
-                                                    file_hint = filename,
+                lambda query, file_path=None: grep_ast(query = query,
+                                                    file_hint = file_path,
                                                     repo_path=repo_path),
             ),
         ]

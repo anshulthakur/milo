@@ -3,6 +3,7 @@ import json
 import os
 import re
 import networkx as nx
+import traceback
 from milo.codesift.parsers.treesitter.treesitter import Treesitter
 from milo.codesift.parsers.utils import get_file_extension, get_programming_language, guess_extension_from_shebang
 from milo.codesift.parsers import supported_languages
@@ -114,43 +115,32 @@ def get_function_metadata(
     G, fn_id: str, metadata: dict = None, file_hint: str = None
 ) -> dict | None:
     """
-    Retrieves structured metadata for a function identified by `fn_id` from either a graph (G) or fallback metadata mappings.
-
-    Args:
-        G: NetworkX graph containing preloaded function metadata in node attributes.
-        fn_id (str): Function identifier, may be short (unqualified name) or fully qualified ("module::name").
-        metadata (dict, optional): Dictionary containing "lookup" and "defined_mappings" for resolution fallbacks.
-        file_hint (str, optional): File path context to disambiguate function resolution when multiple functions share the same name.
-
-    Returns:
-        dict: Function metadata if found in graph or fallback mappings, None if not found/ambiguous.
-
-    Notes:
-        1. Resolves short identifiers via `resolve_function_name()` using metadata[file_hint] to disambiguate between similarly named functions across files.
-        2. Fallbacks to metadata["defined_mappings"] if graph lookup fails (useful for unloaded functions or partial graph populations).
-        3. Ambiguous/missing identifiers trigger diagnostic messages and return None; callers should handle missing results gracefully.
-        4. Prioritizes graph-based resolution (G.nodes) over fallback mappings to ensure metadata consistency with the latest graph state.
+    Retrieves structured metadata for a function from the graph.
     """
-    print("get_function_metadata")
+    try:
+        print("get_function_metadata")
 
-    resolved_id = fn_id
+        resolved_id = fn_id
 
-    if "::" not in fn_id:
-        if not metadata:
-            print("[Missing metadata for lookup resolution]")
+        if "::" not in fn_id:
+            if not metadata:
+                # print("[Missing metadata for lookup resolution]")
+                return None
+            resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
+
+        if not resolved_id:
+            # print(f"[Function not found or ambiguous: {fn_id}]")
             return None
-        resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
 
-    if not resolved_id:
-        print(f"[Function not found or ambiguous: {fn_id}]")
+        if resolved_id in G.nodes:
+            return G.nodes[resolved_id]
+
+        # fallback (if not loaded into graph, but present in metadata)
+        meta_lookup = metadata.get("defined_mappings", {})
+        return meta_lookup.get(resolved_id)
+    except Exception:
+        traceback.print_exc()
         return None
-
-    if resolved_id in G.nodes:
-        return G.nodes[resolved_id]
-
-    # fallback (if not loaded into graph, but present in metadata)
-    meta_lookup = metadata.get("defined_mappings", {})
-    return meta_lookup.get(resolved_id)
 
 
 def get_contextual_neighbors(G, fn_id, metadata=None, depth=2, file_hint=None):
@@ -177,32 +167,36 @@ def get_contextual_neighbors(G, fn_id, metadata=None, depth=2, file_hint=None):
         - Resolution prefers fully qualified names (containing '::')
         - Traversal includes both direct and indirect relationships at each depth level
     """
-    resolved_id = fn_id
+    try:
+        resolved_id = fn_id
 
-    if "::" not in fn_id:  # short name
-        resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
+        if "::" not in fn_id:  # short name
+            resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
 
-    if not resolved_id:
-        print("[Function not found or ambiguous]")
-        return
+        if not resolved_id:
+            # print("[Function not found or ambiguous]")
+            return []
 
-    if resolved_id not in G:
+        if resolved_id not in G:
+            return []
+
+        visited = {resolved_id}
+        frontier = {resolved_id}
+
+        for _ in range(depth):
+            next_frontier = set()
+            for node in frontier:
+                next_frontier.update(set(G.successors(node)))
+                next_frontier.update(set(G.predecessors(node)))
+            next_frontier -= visited
+            visited.update(next_frontier)
+            frontier = next_frontier
+
+        visited.remove(resolved_id)
+        return list(visited)
+    except Exception:
+        traceback.print_exc()
         return []
-
-    visited = {resolved_id}
-    frontier = {resolved_id}
-
-    for _ in range(depth):
-        next_frontier = set()
-        for node in frontier:
-            next_frontier.update(set(G.successors(node)))
-            next_frontier.update(set(G.predecessors(node)))
-        next_frontier -= visited
-        visited.update(next_frontier)
-        frontier = next_frontier
-
-    visited.remove(resolved_id)
-    return list(visited)
 
 
 def search_functions_by_pattern(G, pattern):
@@ -297,27 +291,27 @@ def lookaround_source_snippet(
     - Defined file path is missing or invalid
     - Function definition cannot be located in source
     """
-    resolved_id = fn_id
-
-    if "::" not in fn_id:  # short name
-        resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
-
-    if not resolved_id:
-        print("[Function not found or ambiguous]")
-        return
-
-    meta = G.nodes.get(resolved_id)
-    if not meta:
-        return "[Function not found]"
-
-    filepath = meta.get("defined_in")
-    if len(repo_path) > 0:
-        filepath = os.path.join(repo_path, filepath)
-
-    if not filepath or not os.path.exists(filepath):
-        return f"[Source file missing: {filepath}]"
-
     try:
+        resolved_id = fn_id
+
+        if "::" not in fn_id:  # short name
+            resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
+
+        if not resolved_id:
+            print(f"[Function {fn_id} not found or ambiguous (file_hint:{file_hint})]")
+            return ""
+
+        meta = G.nodes.get(resolved_id)
+        if not meta:
+            return ""
+
+        filepath = meta.get("defined_in")
+        if len(repo_path) > 0:
+            filepath = os.path.join(repo_path, filepath)
+
+        if not filepath or not os.path.exists(filepath):
+            return ""
+
         func_name = resolved_id.split("::")[-1]
         # If qualified name (MyClass.greet), search for short name (greet)
         short_name = func_name.split(".")[-1]
@@ -330,9 +324,10 @@ def lookaround_source_snippet(
                 start = max(i - context_lines, 0)
                 end = min(i + context_lines + 1, len(lines))
                 return "".join(lines[start:end])
-        return "[Function not located in source]"
-    except Exception as e:
-        return f"[Error reading source: {str(e)}]"
+        return ""
+    except Exception:
+        traceback.print_exc()
+        return ""
 
 
 def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
@@ -361,41 +356,41 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
     - [Language not supported] for unsupported extensions
     - [Error reading source: ...] for parsing/IO errors
     """
-    resolved_id = fn_id
-
-    if "::" not in fn_id:  # short name
-        resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
-
-    if not resolved_id:
-        print("[Function not found or ambiguous]")
-        return
-
-    meta = G.nodes.get(resolved_id)
-    if not meta:
-        return "[Function not found]"
-
-    func_name = resolved_id.split("::")[-1]
-    filepath = meta.get("defined_in")
-    if len(repo_path) > 0:
-        filepath = os.path.join(repo_path, filepath)
-
-    if not filepath or not os.path.exists(filepath):
-        return f"[Source file missing: {filepath}]"
-
-    extension = get_file_extension(filepath)
-    if len(extension) == 0:
-        extension = guess_extension_from_shebang(file_path=filepath)
-    if len(extension) == 0:
-        print(f"Undetermined extension in {filepath}")
-        return
-    lang = get_programming_language(extension)
-    if lang.value not in supported_languages():
-        print(f"Language {lang} not supported yet.")
-        return
-    
-    treesitter = Treesitter.create_treesitter(lang)
-
     try:
+        resolved_id = fn_id
+
+        if "::" not in fn_id:  # short name
+            resolved_id = resolve_function_name(fn_id, metadata, file_hint=file_hint)
+
+        if not resolved_id:
+            # print("[Function not found or ambiguous]")
+            return ""
+
+        meta = G.nodes.get(resolved_id)
+        if not meta:
+            return ""
+
+        func_name = resolved_id.split("::")[-1]
+        filepath = meta.get("defined_in")
+        if len(repo_path) > 0:
+            filepath = os.path.join(repo_path, filepath)
+
+        if not filepath or not os.path.exists(filepath):
+            return ""
+
+        extension = get_file_extension(filepath)
+        if len(extension) == 0:
+            extension = guess_extension_from_shebang(file_path=filepath)
+        if len(extension) == 0:
+            # print(f"Undetermined extension in {filepath}")
+            return ""
+        lang = get_programming_language(extension)
+        if lang.value not in supported_languages():
+            # print(f"Language {lang} not supported yet.")
+            return ""
+        
+        treesitter = Treesitter.create_treesitter(lang)
+
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             code = f.read()
         treesitter.parse(code.encode("utf8"))
@@ -404,10 +399,10 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
             qname = _get_qualified_name_from_node(func)
             if qname == func_name:
                 return func.source_code
-        return "[Function not located in source]"
-
-    except Exception as e:
-        return f"[Error reading source: {str(e)}]"
+        return ""
+    except Exception:
+        traceback.print_exc()
+        return ""
 
 
 from typing import Dict, List

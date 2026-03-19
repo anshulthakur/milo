@@ -49,9 +49,8 @@ class TestCombIntegration(unittest.TestCase):
         self.file_py_nogit.write_text('class Utils:\n    def do_something(self):\n        pass', encoding='utf-8')
 
     def tearDown(self):
-        # if self.tmp_root.exists():
-        #     shutil.rmtree(self.tmp_root)
-        pass
+        if self.tmp_root.exists():
+            shutil.rmtree(self.tmp_root)
 
     def test_comb_git_repo(self):
         """Test commenting on a git repo (multiple files)."""

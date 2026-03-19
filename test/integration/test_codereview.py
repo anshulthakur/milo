@@ -43,6 +43,10 @@ class TestCrabIntegration(unittest.TestCase):
         self.standalone_file = self.standalone_path / "standalone_app.py"
         self.standalone_file.write_text("def process_data():\n    return 1\n")
 
+    def tearDown(self):
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+
     def test_run_crab_e2e_no_mocks(self):
         """
         Exploratory end-to-end test for run_crab without mocks.
