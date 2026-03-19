@@ -69,6 +69,11 @@ def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str
         if patched_file.is_removed_file:
             continue
 
+        abs_file_path = os.path.abspath(os.path.join(repo_root, file_path))
+        if files:
+            if not any(os.path.abspath(f) == abs_file_path for f in files):
+                continue
+
         file_content = file_manager.get_file_content(file_path, head_rev)
         if not file_content:
             continue

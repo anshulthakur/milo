@@ -477,5 +477,125 @@ class TestCrabIntegration(unittest.TestCase):
         meta_args = GetMetadataArgs(fn_name="main", file_path="app.py")
         self.assertEqual(meta_args.file_path, "app.py")
 
+class TestCrabCoverageMocked(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = Path('/tmp/crab_coverage').resolve()
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+        self.tmp_dir.mkdir(parents=True)
+
+        # 1. Setup Git directory
+        self.repo_dir = self.tmp_dir / "repo"
+        self.repo_dir.mkdir()
+        self.repo = Repo.init(self.repo_dir)
+        with self.repo.config_writer() as cw:
+            cw.set_value("user", "name", "Test User").release()
+            cw.set_value("user", "email", "test@example.com").release()
+
+        self.app1 = self.repo_dir / "app1.py"
+        self.app1.write_text("def func1(): pass\n")
+        self.app2 = self.repo_dir / "app2.py"
+        self.app2.write_text("def func2(): pass\n")
+        
+        self.repo.index.add(["app1.py", "app2.py"])
+        self.repo.index.commit("Initial commit")
+
+        # 2. Setup Non-Git directory
+        self.nogit_dir = self.tmp_dir / "nogit"
+        self.nogit_dir.mkdir()
+        self.script1 = self.nogit_dir / "script1.py"
+        self.script1.write_text("def func3(): pass\n")
+        self.script2 = self.nogit_dir / "script2.py"
+        self.script2.write_text("def func4(): pass\n")
+        
+    def tearDown(self):
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+
+    def _setup_mock(self, mock_get_agent):
+        mock_agent = MagicMock()
+        mock_get_agent.return_value = mock_agent
+        review_payload = [
+            CodeReview(
+                type=DefectEnum.bug,
+                file="test.py",
+                line=1,
+                description="Mocked Review",
+                suggestion="Fix it"
+            ).model_dump()
+        ]
+        mock_agent.call.return_value = json.dumps(review_payload)
+        return mock_agent
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_case_1_subset_git(self, mock_get_agent):
+        mock_agent = self._setup_mock(mock_get_agent)
+        
+        self.app1.write_text("def func1(): print('a')\n")
+        self.app2.write_text("def func2(): print('b')\n")
+        self.repo.index.add(["app1.py", "app2.py"])
+        self.repo.index.commit("Update both")
+        
+        file_manager = LocalGitProvider(str(self.repo_dir))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_dir), files=[str(self.app1)])
+        
+        self.assertEqual(mock_agent.call.call_count, 1)
+        store = ReviewStore(self.repo_dir / ".milo" / "reviews.json")
+        self.assertEqual(len(store.get_reviews_by_file("app1.py")), 1)
+        self.assertEqual(len(store.get_reviews_by_file("app2.py")), 0)
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_case_2_entire_git(self, mock_get_agent):
+        mock_agent = self._setup_mock(mock_get_agent)
+        
+        self.app1.write_text("def func1(): print('c')\n")
+        self.app2.write_text("def func2(): print('d')\n")
+        self.repo.index.add(["app1.py", "app2.py"])
+        self.repo.index.commit("Update both again")
+        
+        file_manager = LocalGitProvider(str(self.repo_dir))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_dir), files=[str(self.app1), str(self.app2)])
+        
+        self.assertEqual(mock_agent.call.call_count, 2)
+        store = ReviewStore(self.repo_dir / ".milo" / "reviews.json")
+        self.assertEqual(len(store.get_reviews_by_file("app1.py")), 1)
+        self.assertEqual(len(store.get_reviews_by_file("app2.py")), 1)
+        
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_case_3_staged_changes_git(self, mock_get_agent):
+        mock_agent = self._setup_mock(mock_get_agent)
+        self.app1.write_text("def func1(): print('staged')\n")
+        self.repo.index.add(["app1.py"])
+        
+        file_manager = LocalGitProvider(str(self.repo_dir))
+        changed = file_manager.get_changed_files(str(self.repo_dir))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_dir), files=changed, review_staged=True)
+        
+        self.assertEqual(mock_agent.call.call_count, 1)
+        store = ReviewStore(self.repo_dir / ".milo" / "reviews.json")
+        self.assertEqual(len(store.get_reviews_by_file("app1.py")), 1)
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_case_4_all_nogit(self, mock_get_agent):
+        mock_agent = self._setup_mock(mock_get_agent)
+        file_manager = FileSystemProvider(str(self.nogit_dir))
+        run_crab(file_manager=file_manager, repo_root=str(self.nogit_dir), files=[str(self.script1), str(self.script2)])
+        
+        self.assertEqual(mock_agent.call.call_count, 2)
+        store = ReviewStore(self.nogit_dir / ".milo" / "reviews.json")
+        self.assertEqual(len(store.get_reviews_by_file("script1.py")), 1)
+        self.assertEqual(len(store.get_reviews_by_file("script2.py")), 1)
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_case_5_subset_nogit(self, mock_get_agent):
+        mock_agent = self._setup_mock(mock_get_agent)
+        file_manager = FileSystemProvider(str(self.nogit_dir))
+        run_crab(file_manager=file_manager, repo_root=str(self.nogit_dir), files=[str(self.script1)])
+        
+        self.assertEqual(mock_agent.call.call_count, 1)
+        store = ReviewStore(self.nogit_dir / ".milo" / "reviews.json")
+        self.assertEqual(len(store.get_reviews_by_file("script1.py")), 1)
+        self.assertEqual(len(store.get_reviews_by_file("script2.py")), 0)
+
 if __name__ == '__main__':
     unittest.main()
