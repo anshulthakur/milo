@@ -12,6 +12,31 @@ LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://srsw.cdot.in:11434/v1")
 LLM_MODEL = os.environ.get('LLM_MODEL', "comb")
 
 
+class ContextProcessor:
+    """Base interface for managing context/history passed to the LLM."""
+    def add_message(self, message: Dict[str, Any]):
+        raise NotImplementedError
+
+    def get_messages(self) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def clear(self):
+        raise NotImplementedError
+
+class DefaultContextProcessor(ContextProcessor):
+    """Default context processor that simply appends all messages."""
+    def __init__(self):
+        self._history = []
+
+    def add_message(self, message: Dict[str, Any]):
+        self._history.append(message)
+
+    def get_messages(self) -> List[Dict[str, Any]]:
+        return self._history
+
+    def clear(self):
+        self._history = []
+
 class Agent:
     def __init__(
         self,
@@ -22,6 +47,7 @@ class Agent:
         format=None,
         model=LLM_MODEL,
         endpoint = LLM_ENDPOINT,
+        context_processor: ContextProcessor = None,
     ):
         """
         Initialize an Agent instance connected to an OpenAI-compatible LLM service.
@@ -38,6 +64,7 @@ class Agent:
             system_prompt (str): System message to prepend to all interactions (default: empty)
             format (Any): Expected response format specification (e.g., "json_object"). (default: None)
             model (str): Model name to use (default: LLM_MODEL from settings)
+            context_processor (ContextProcessor): Manager for the conversation context handling.
 
         Attributes:
             history (List): Conversation history maintained as message list (initialized empty)
@@ -47,11 +74,15 @@ class Agent:
         self.endpoint = endpoint
         self.system_prompt = system_prompt
         self.tools: Dict[str, Tool] = {t.name: t for t in tools}
-        self.history = []
         self.model = model
         self.client = OpenAI(base_url=self.endpoint, api_key="ollama") # api_key is required but not used for local Ollama
         self.options = options
         self.format = format
+        self.context_processor = context_processor or DefaultContextProcessor()
+
+    @property
+    def history(self) -> List[Dict[str, Any]]:
+        return self.context_processor.get_messages()
 
     def seed_context(self, seed: str):
         """
@@ -68,13 +99,13 @@ class Agent:
             Appends a message dictionary to self.history in the format:
             {"role": "user", "content": <seed_value>}
         """
-        self.history.append({"role": "user", "content": seed})
+        self.context_processor.add_message({"role": "user", "content": seed})
 
     def clear_history(self):
         """
         Resets the agent's conversation history to an empty list.
         """
-        self.history = []
+        self.context_processor.clear()
 
     def set_format(self, format):
         self.format = format
@@ -92,7 +123,7 @@ class Agent:
             Any: Processed response message from chat client, typically containing AI-generated content.
         """
         if followup is not None:
-            self.history.append({"role": "user", "content": followup})
+            self.context_processor.add_message({"role": "user", "content": followup})
             print("Followup chat::")
 
         print(self.history)
@@ -100,7 +131,7 @@ class Agent:
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
-        messages.extend(self.history)
+        messages.extend(self.context_processor.get_messages())
 
         tools = [
             {
@@ -155,7 +186,7 @@ class Agent:
             else None,
         }
         
-        self.history.append(message_dict)
+        self.context_processor.add_message(message_dict)
         print("Reply::")
         print(message_dict)
         return self._handle_response(message_dict)
@@ -195,7 +226,7 @@ class Agent:
                 results.append({"tool": tool_name, "result": result})
 
                 # Add result back to conversation history
-                self.history.append(
+                self.context_processor.add_message(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id"),
@@ -212,7 +243,7 @@ class Agent:
                     "traceback": tb,
                 }
                 results.append(error_msg)
-                self.history.append(
+                self.context_processor.add_message(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id"),
