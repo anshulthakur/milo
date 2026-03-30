@@ -2,9 +2,9 @@ import argparse
 import sys
 import os
 from milo.codereview import review_path
-from milo.utils.vcs import get_git_root, LocalGitProvider, FileSystemProvider
+from milo.utils import get_git_root, LocalGitProvider, FileSystemProvider
 
-from milo.documentation.documentation import run_comb
+from milo.documentation import run_comb
 from milo.codereview.codereview import run_crab
 
 def crab_main():

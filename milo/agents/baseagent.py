@@ -96,7 +96,7 @@ class Agent:
                         - High-level reasoning instructions
 
         Side Effects:
-            Appends a message dictionary to self.history in the format:
+            Appends a message dictionary to the conversation history in the format:
             {"role": "user", "content": <seed_value>}
         """
         self.context_processor.add_message({"role": "user", "content": seed})
