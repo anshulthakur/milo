@@ -22,6 +22,10 @@ class TreesitterC(Treesitter):
             "pthread_create": 2,  # 3rd argument (0-indexed)
             "signal": 1,          # 2nd argument
         }
+        
+    @property
+    def documentable_node_types(self) -> list[str]:
+        return ["function_definition", "struct_specifier", "type_definition"]
 
     def _extract_node_name(self, node) -> Optional[str]:
         declarator = node.child_by_field_name("declarator")

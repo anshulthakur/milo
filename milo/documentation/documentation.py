@@ -388,6 +388,9 @@ def run_comb(file_manager: Optional[FileManager] = None, repo_root: Optional[str
                 treesitter_parser.parse(file_content)
                 treesitter_nodes = treesitter_parser.iterate_blocks()
                 for node in treesitter_nodes:
+                    if node.node_type not in treesitter_parser.documentable_node_types:
+                        continue
+                        
                     method_name = node.name
                     method_comment = None
 

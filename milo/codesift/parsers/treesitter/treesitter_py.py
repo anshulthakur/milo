@@ -20,6 +20,10 @@ class TreesitterPython(Treesitter):
                 (import_statement) @import
             """
         }
+        
+    @property
+    def documentable_node_types(self) -> list[str]:
+        return ["function_definition", "class_definition", "decorated_definition"]
 
     def _extract_node_name(self, node) -> Optional[str]:
         name_node = node.child_by_field_name("name")

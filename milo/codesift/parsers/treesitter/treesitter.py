@@ -39,6 +39,11 @@ class Treesitter(ABC):
         """Parses the file content and builds the AST."""
         self.tree = self.parser.parse(file_bytes)
 
+    @property
+    def documentable_node_types(self) -> list[str]:
+        """Returns a list of node types that typically require documentation."""
+        return []
+
     @abstractmethod
     def iterate_blocks(self):
         """Iterates over the major recognizable blocks of the source tree."""
