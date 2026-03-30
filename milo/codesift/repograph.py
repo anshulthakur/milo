@@ -2,8 +2,7 @@ import os
 import sys
 import networkx as nx
 from milo.codesift.parsers.treesitter.treesitter import Treesitter
-from milo.codesift.parsers.languages import supported_languages, supported_extensions
-from milo.codesift.parsers.utils import get_programming_language, get_file_extension, guess_extension_from_shebang
+from milo.codesift.parsers.languages import supported_languages, supported_extensions, get_programming_language, get_file_extension, guess_extension_from_shebang
 from tree_sitter import Node, Tree
 import json
 import re

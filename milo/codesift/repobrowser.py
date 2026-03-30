@@ -5,7 +5,7 @@ import re
 import networkx as nx
 import traceback
 from milo.codesift.parsers.treesitter.treesitter import Treesitter
-from milo.codesift.parsers.utils import get_file_extension, get_programming_language, guess_extension_from_shebang
+from milo.codesift.parsers.languages import get_file_extension, get_programming_language, guess_extension_from_shebang
 from milo.codesift.parsers import supported_languages
 from tree_sitter import Node, Tree
 

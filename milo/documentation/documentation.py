@@ -10,7 +10,7 @@ import traceback
 
 from milo.codesift.parsers import supported_languages, Treesitter
 from milo.codesift.repograph import create_repograph
-from milo.codesift.parsers.utils import get_programming_language, get_file_extension, guess_extension_from_shebang
+from milo.codesift.parsers.languages import get_programming_language, get_file_extension, guess_extension_from_shebang
 from milo.utils.vcs import FileManager
 
 from milo.agents.documentation import get_agent as get_documentation_agent
