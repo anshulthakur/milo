@@ -1,6 +1,6 @@
 # Milo Documentation API (`run_comb`)
 
-The `milo.documentation.documentation.run_comb` function provides a high-level API to programmatically generate documentation for source code files. It orchestrates file discovery, code analysis, and AI-powered documentation generation, acting as a convenient wrapper around the underlying `DocumentationAgent`.
+The `milo.documentation.run_comb` function provides a high-level API to programmatically generate documentation for source code files. It orchestrates file discovery, code analysis, and AI-powered documentation generation, acting as a convenient wrapper around the underlying `DocumentationAgent`.
 
 This document outlines how to integrate `run_comb` into your own Python services.
 
@@ -106,3 +106,43 @@ print("Documentation complete.")
 -   **`repo_root`** (`str`): The absolute path to the root of the repository or source directory. Milo uses this path to create a `.milo` directory for caching analysis results. This is a **required** parameter.
 -   **`repo_name`** (`str`): The name of the repository (e.g., `my-project`). This is a **required** parameter.
 -   **`files`** (`List[str]`): A list of absolute file paths to be documented. This is a **required** parameter.
+
+## Utility Functions
+
+This section documents helper functions that can be useful when integrating with Milo.
+
+### `is_file_supported(file_name: str) -> bool`
+
+Checks if a given file is supported for documentation generation. This is useful for pre-filtering files before passing them to `run_comb`.
+
+**Import:**
+```python
+from milo.codesift.parsers import is_file_supported
+```
+
+**Parameters:**
+
+-   **`file_name`** (`str`): The path to the file.
+
+**Returns:**
+
+-   `bool`: `True` if the file's language is supported, `False` otherwise.
+
+**Behavior:**
+
+-   It first checks the file's extension (e.g., `.py`, `.c`, `.h`).
+-   If no extension is found, and the file exists on disk, it will attempt to read the first line to check for a shebang (e.g., `#!/usr/bin/env python`) to infer the language.
+-   The list of supported languages is determined by `milo.codesift.parsers.supported_languages()`.
+
+**Example:**
+
+```python
+from milo.codesift.parsers import is_file_supported
+
+# Check supported files
+assert is_file_supported("my_script.py") is True
+assert is_file_supported("/path/to/my_c_file.h") is True
+
+# Check an unsupported file
+assert is_file_supported("README.md") is False
+```
