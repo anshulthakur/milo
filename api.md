@@ -1,14 +1,14 @@
-# Milo Documentation API (`run_comb`)
+# Milo API Integration Guide
 
-The `milo.documentation.run_comb` function provides a high-level API to programmatically generate documentation for source code files. It orchestrates file discovery, code analysis, and AI-powered documentation generation, acting as a convenient wrapper around the underlying `DocumentationAgent`.
+Milo provides high-level APIs to programmatically generate documentation and perform code reviews. These orchestration functions act as convenient wrappers around the underlying AI agents.
 
-This document outlines how to integrate `run_comb` into your own Python services.
+This document outlines how to integrate `run_comb` (documentation) and `run_crab` (code review) into your own Python services.
 
 ## Core Concepts
 
-To use `run_comb`, you need to understand two key components:
+To use the Milo API, you need to understand two key components:
 
-1.  **`run_comb`**: The main entry point function. It requires a list of files and a `FileManager` to operate.
+1.  **Entry Points**: `run_comb` (for documentation) and `run_crab` (for code review).
 2.  **`FileManager`**: An abstraction that provides file content and metadata. Milo includes two implementations:
     *   `LocalGitProvider`: Use this when your code is in a Git repository. It can intelligently find all files or only those that have been changed.
     *   `FileSystemProvider`: Use this for any regular directory that is not a Git repository.
@@ -23,6 +23,8 @@ The documentation agent requires a connection to an OpenAI-compatible Large Lang
     *   *Example*: `export LLM_MODEL="comb"`
 
 ## Usage Scenarios
+
+### Documentation API (`run_comb`)
 
 Below are examples demonstrating how to call `run_comb` for different project types.
 
@@ -106,6 +108,47 @@ print("Documentation complete.")
 -   **`repo_root`** (`str`): The absolute path to the root of the repository or source directory. Milo uses this path to create a `.milo` directory for caching analysis results. This is a **required** parameter.
 -   **`repo_name`** (`str`): The name of the repository (e.g., `my-project`). This is a **required** parameter.
 -   **`files`** (`List[str]`): A list of absolute file paths to be documented. This is a **required** parameter.
+
+### Code Review API (`run_crab`)
+
+The `milo.codereview.run_crab` function orchestrates code analysis and AI-powered code reviews, generating feedback on changed code. It uses a `ReviewStore` to persist review state and avoid redundant reviews on unchanged code blocks.
+
+**Usage Example:**
+
+```python
+import os
+from milo.codereview import run_crab
+from milo.utils import LocalGitProvider
+
+# 1. Specify the path to the local git repository
+repo_path = "/path/to/your/git/repo"
+
+# 2. Instantiate the provider
+git_provider = LocalGitProvider(repo_path)
+
+# 3. Get repository metadata
+repo_root = git_provider.repo_root
+
+# 4. Run the code review process on staged changes
+print("Starting code review for staged changes...")
+run_crab(
+    file_manager=git_provider,
+    repo_root=repo_root,
+    review_staged=True  # Set to False to review recent commits instead
+)
+print("Code review complete.")
+```
+
+**Function Signature:**
+
+`run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str] = None, files: List[str] = None, review_staged: bool = False) -> None`
+
+**Parameters:**
+
+-   **`file_manager`** (`Optional[FileManager]`): An initialized instance of `LocalGitProvider` or `FileSystemProvider`. Required to detect changes.
+-   **`repo_root`** (`Optional[str]`): The absolute path to the root of the repository. Milo uses this path to create a `.milo` directory for the `ReviewStore` and `metadata.json`.
+-   **`files`** (`List[str]`): An optional list of absolute file paths to restrict the review. If empty, all changed files identified by the `file_manager` are reviewed.
+-   **`review_staged`** (`bool`): If `True`, reviews staged changes (index vs. HEAD). If `False`, reviews the latest commit (HEAD vs. HEAD~1). Defaults to `False`.
 
 ## Utility Functions
 
