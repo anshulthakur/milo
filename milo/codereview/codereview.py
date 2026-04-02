@@ -193,15 +193,31 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
                     if target_line is not None:
                         changed_target_lines.append(target_line)
 
-            matched_defs = []
+            matched_defs_set = set()
             
-            for definition in definitions:
-                def_start = definition.node.start_point[0] + 1
-                def_end = definition.node.end_point[0] + 1
-                
-                score = sum(1 for line_no in changed_target_lines if def_start <= line_no <= def_end)
-                if score > 0:
-                    matched_defs.append(definition)
+            for line_no in changed_target_lines:
+                best_def = None
+                min_dist = float('inf')
+                for definition in definitions:
+                    def_start = definition.node.start_point[0] + 1
+                    def_end = definition.node.end_point[0] + 1
+                    
+                    if def_start <= line_no <= def_end:
+                        dist = 0
+                    elif line_no < def_start:
+                        dist = def_start - line_no
+                    else:
+                        dist = line_no - def_end
+                        
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_def = definition
+                        
+                # Allow up to 10 lines of proximity buffer to attach detached comments/macros
+                if best_def and min_dist <= 10:
+                    matched_defs_set.add(best_def)
+            
+            matched_defs = list(matched_defs_set)
             
             # Fallback to general overlap if no changed lines are strictly inside any function
             if not matched_defs:
