@@ -150,6 +150,58 @@ print("Code review complete.")
 -   **`files`** (`List[str]`): An optional list of absolute file paths to restrict the review. If empty, all changed files identified by the `file_manager` are reviewed.
 -   **`review_staged`** (`bool`): If `True`, reviews staged changes (index vs. HEAD). If `False`, reviews the latest commit (HEAD vs. HEAD~1). Defaults to `False`.
 
+### Advanced Code Review Integration
+
+For tighter integration with custom CI/CD pipelines, git forges, or IDE extensions, Milo exposes its underlying diff processing and state management utilities.
+
+#### Diff Utilities (`DiffUtils`)
+
+The `DiffUtils` class provides static methods for processing and fingerprinting code changes. These are essential for mapping git diffs to LLM prompts and detecting semantic changes.
+
+**Import:**
+```python
+from milo.codereview.diff import DiffUtils
+```
+
+**Key Methods:**
+
+-   **`DiffUtils.format_hunk_with_line_numbers(hunk: Hunk) -> str`**: Converts a `unidiff.Hunk` object into a unified diff string with explicit line numbers, which is crucial for grounding the LLM's spatial awareness.
+-   **`DiffUtils.compute_patch_fingerprint(hunk: Hunk) -> str`**: Generates a SHA-256 hash of a normalized diff hunk (ignoring whitespace and context lines) to uniquely identify a specific code change.
+-   **`DiffUtils.compute_ast_fingerprint(node: Node) -> str`**: Generates a semantic SHA-256 hash from a `tree_sitter.Node`. This allows Milo to determine if the *meaning* or *structure* of a code block changed, ignoring pure whitespace or comment modifications.
+
+#### State Management (`ReviewStore`)
+
+Milo uses a persistent state store to track code review threads, ensuring comments remain anchored to code even as it evolves across multiple commits.
+
+**Import:**
+```python
+from milo.codereview.state import ReviewStore, ReviewStatus
+from pathlib import Path
+```
+
+**Usage Example:**
+
+```python
+# Initialize the review store
+store_path = Path("/path/to/repo/.milo/reviews.json")
+review_store = ReviewStore(store_path)
+
+# Retrieve all open reviews for a specific file
+open_reviews = review_store.get_reviews_by_file(
+    file_path="src/main.py",
+    status=ReviewStatus.OPEN
+)
+
+# Find a specific review by its semantic anchor (file + function name)
+existing_review = review_store.find_matching_review(
+    file_path="src/main.py",
+    symbol_name="process_request"
+)
+
+if existing_review:
+    print(f"Found existing review thread with {len(existing_review.conversation)} messages.")
+```
+
 ## Utility Functions
 
 This section documents helper functions that can be useful when integrating with Milo.

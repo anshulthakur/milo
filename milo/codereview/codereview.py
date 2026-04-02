@@ -174,15 +174,53 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
             hunk_start = hunk.target_start
             hunk_end = hunk.target_start + hunk.target_length
             
-            matched_def = None
+            # Determine which target lines were actually changed
+            changed_target_lines = []
+            for i, line in enumerate(hunk):
+                if line.is_added:
+                    changed_target_lines.append(line.target_line_no)
+                elif line.is_removed:
+                    target_line = None
+                    for j in range(i + 1, len(hunk)):
+                        if hunk[j].target_line_no is not None:
+                            target_line = hunk[j].target_line_no
+                            break
+                    if target_line is None:
+                        for j in range(i - 1, -1, -1):
+                            if hunk[j].target_line_no is not None:
+                                target_line = hunk[j].target_line_no
+                                break
+                    if target_line is not None:
+                        changed_target_lines.append(target_line)
+
+            matched_defs = []
+            
             for definition in definitions:
                 def_start = definition.node.start_point[0] + 1
                 def_end = definition.node.end_point[0] + 1
-                if (hunk_start <= def_end) and (hunk_end >= def_start):
-                    matched_def = definition
-                    break
+                
+                score = sum(1 for line_no in changed_target_lines if def_start <= line_no <= def_end)
+                if score > 0:
+                    matched_defs.append(definition)
             
-            if matched_def:
+            # Fallback to general overlap if no changed lines are strictly inside any function
+            if not matched_defs:
+                max_overlap = 0
+                best_match = None
+                for definition in definitions:
+                    def_start = definition.node.start_point[0] + 1
+                    def_end = definition.node.end_point[0] + 1
+                    hunk_end_inclusive = max(hunk_start, hunk.target_start + hunk.target_length - 1)
+                    overlap_start = max(hunk_start, def_start)
+                    overlap_end = min(hunk_end_inclusive, def_end)
+                    overlap = max(0, overlap_end - overlap_start + 1)
+                    if overlap > max_overlap:
+                        max_overlap = overlap
+                        best_match = definition
+                if best_match:
+                    matched_defs.append(best_match)
+            
+            for matched_def in matched_defs:
                 review_targets.append((hunk, matched_def))
     else:
         # Standalone mode: Review all definitions in the file

@@ -618,6 +618,110 @@ class TestCrabIntegration(unittest.TestCase):
         self.assertTrue(any("[bug] app.py:6 - Zero tax rate" in msg for msg in printed_messages),
                         "Failed to translate virtual line 8 to actual target line 6.")
 
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_hunk_matching_adjacent_functions(self, mock_get_agent):
+        """
+        Test that changes are correctly attributed to the modified function
+        even if the unified diff context overlaps with an adjacent function.
+        """
+        # 1. Setup C file with two adjacent functions
+        c_file_path = self.repo_path / "app.c"
+        initial_code = (
+            "int func1() {\n"
+            "    return 1;\n"
+            "}\n"
+            "\n"
+            "void func2(int a) {\n"
+            "    printf(\"%d\", a);\n"
+            "}\n"
+        )
+        c_file_path.write_text(initial_code)
+        self.repo.index.add(["app.c"])
+        self.repo.index.commit("Initial commit app.c")
+
+        # 2. Modify func2. The diff context will include the end of func1.
+        modified_code = initial_code.replace('printf("%d", a);', 'printf("value: %d", a);\n    return;')
+        c_file_path.write_text(modified_code)
+        self.repo.index.add(["app.c"])
+        self.repo.index.commit("Modify func2")
+
+        # 3. Setup mock agent
+        mock_agent_instance = MagicMock()
+        mock_get_agent.return_value = mock_agent_instance
+        review_payload = [CodeReview(type=DefectEnum.bug, file="app.c", line=6, description="Test issue", suggestion="Fix").model_dump()]
+        mock_agent_instance.call.return_value = json.dumps(review_payload)
+
+        # 4. Run CRAB
+        file_manager = LocalGitProvider(str(self.repo_path))
+        
+        # Explicitly verify the test's diff premise: 
+        # Ensure git generated exactly 1 hunk, and its context naturally overlaps with func1's closing brace
+        changes = file_manager.get_changes("HEAD~1", "HEAD")
+        self.assertEqual(len(changes[0]), 1, "Expected exactly 1 hunk due to context overlap")
+        self.assertTrue(any(line.is_context and "}" in line.value for line in changes[0][0]), "Expected hunk context to contain func1's closing brace")
+        
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
+
+        # 5. Verify ReviewStore captured the correct symbol (func2, NOT func1)
+        store = ReviewStore(self.repo_path / ".milo" / "reviews.json")
+        reviews = store.get_reviews_by_file("app.c")
+        
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0].anchor.symbol_name, "func2")
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_hunk_matching_multiple_functions(self, mock_get_agent):
+        """
+        Test that a single unfocused diff hunk spanning modifications across 
+        multiple functions correctly maps to all modified functions based on score.
+        """
+        # 1. Setup C file with two adjacent functions
+        c_file_path = self.repo_path / "app.c"
+        initial_code = (
+            "void func1() {\n"
+            "    int a = 1;\n"
+            "}\n"
+            "void func2() {\n"
+            "    int b = 2;\n"
+            "}\n"
+        )
+        c_file_path.write_text(initial_code)
+        self.repo.index.add(["app.c"])
+        self.repo.index.commit("Initial commit app.c multiple")
+
+        # 2. Modify both functions. The context overlap will cause Git to output a single hunk.
+        modified_code = initial_code.replace('int a = 1;', 'int a = 1;\n    a++;').replace('int b = 2;', 'int b = 2;\n    b++;')
+        c_file_path.write_text(modified_code)
+        self.repo.index.add(["app.c"])
+        self.repo.index.commit("Modify both functions")
+
+        # 3. Setup mock agent
+        mock_agent_instance = MagicMock()
+        mock_get_agent.return_value = mock_agent_instance
+        review_payload = [CodeReview(type=DefectEnum.bug, file="app.c", line=3, description="Test issue", suggestion="Fix").model_dump()]
+        mock_agent_instance.call.return_value = json.dumps(review_payload)
+
+        # 4. Run CRAB
+        file_manager = LocalGitProvider(str(self.repo_path))
+        
+        # Explicitly verify the test's diff premise: 
+        # Both functions modified within 3 lines of each other should merge into exactly ONE unfocused hunk
+        changes = file_manager.get_changes("HEAD~1", "HEAD")
+        self.assertEqual(len(changes[0]), 1, "Expected both modifications to be merged into a single unfocused hunk")
+        hunk_text = str(changes[0][0])
+        self.assertTrue("a++" in hunk_text and "b++" in hunk_text, "Hunk must contain modifications for both functions")
+
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
+
+        # 5. Verify ReviewStore captured both symbols (func1 and func2)
+        store = ReviewStore(self.repo_path / ".milo" / "reviews.json")
+        reviews = store.get_reviews_by_file("app.c")
+        
+        self.assertEqual(len(reviews), 2)
+        symbol_names = [r.anchor.symbol_name for r in reviews]
+        self.assertIn("func1", symbol_names)
+        self.assertIn("func2", symbol_names)
+
 class TestCrabCoverageMocked(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = Path('/tmp/crab_coverage').resolve()
