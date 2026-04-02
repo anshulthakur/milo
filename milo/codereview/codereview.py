@@ -13,7 +13,65 @@ from milo.codereview.diff import DiffUtils
 from milo.utils.vcs import FileManager
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 
-def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str] = None, files: List[str] = None, review_staged: bool = False) -> None:
+class ReviewEngine:
+    """
+    Extensible engine for generating code reviews using an LLM agent.
+    Separates the LLM interaction from state management and VCS operations.
+    """
+    def __init__(self, agent):
+        self.agent = agent
+
+    def generate_reviews(self, lang: str, code: str, file_path: str, hunk_text: Optional[str] = None, history: Optional[List[Any]] = None, line_map: Optional[Dict[int, int]] = None) -> list:
+        try:
+            if hunk_text:
+                request = (f"You are reviewing changes in `{file_path}`. "
+                           "The `diff_hunk` field contains the unified diff of modifications with line numbers on the left. "
+                           "The `method` field contains the full function source after applying changes. "
+                           "Analyze both added (+) and removed (-) lines. If removing code introduces a bug, report it, "
+                           "but always anchor the line number of your feedback to a nearby added (+) or context ( ) line that still exists in the new code. "
+                           "Do not comment on parts of the code that were not changed. "
+                           "When returning the line number, use the line number listed on the left side of the diff_hunk. "
+                           "Return the result in JSON format using the schema provided. "
+                           "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
+            else:
+                request = ("Please review the entire method source provided for potential bugs, style violations, or performance issues. "
+                           "The method code is provided with line numbers on the left. "
+                           "When returning the line number, use the line number listed on the left side of the method code. "
+                           "Return the result in JSON format using the schema provided. "
+                           "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
+
+            user_prompt = ReviewInputCode(
+                language=lang,
+                method=code,
+                file_path=file_path,
+                diff_hunk=hunk_text,
+                request=request
+            )
+            
+            # Inject history if available
+            self.agent.clear_history()
+            self.agent.set_format(ReviewListModel.json_schema())
+            
+            # TODO: Inject history into prompt text if Agent doesn't support it natively yet
+            
+            response = self.agent.call(user_prompt.model_dump_json())
+            response_json = json.loads(response)
+            reviews = ReviewListModel.validate_python(response_json if isinstance(response_json, list) else [])
+            
+            if line_map and reviews:
+                fallback_line = next(iter(line_map.values())) if line_map else 0
+                for review in reviews:
+                    # Map the LLM's virtual line back to the actual line number
+                    # If LLM hallucinates a line, fallback to the first mapped line
+                    review.line = line_map.get(review.line, fallback_line)
+            
+            return reviews
+        except Exception:
+            print(f"Error generating reviews for {file_path}")
+            traceback.print_exc()
+            return []
+
+def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str] = None, files: List[str] = None, review_staged: bool = False) -> List[Review]:
     """
     Main entry point for CRAB (Comment Review and Aggregation Bot).
     Orchestrates the review process using file managers, State Store, and Agents.
@@ -46,6 +104,7 @@ def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str
 
     # 3. Initialize Agent
     agent = get_codereview_agent(metadata_path=metadata_path, repo_path=repo_root)
+    review_engine = ReviewEngine(agent)
 
     # 4. Determine Changes to Review
     if not file_manager:
@@ -62,6 +121,7 @@ def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str
         base_rev = f"{head_rev}~1" if head_rev != "HEAD" else "HEAD"
     
     patch_set = file_manager.get_changes(base_rev, head_rev)
+    all_reviews = []
     
     for patched_file in patch_set:
         file_path = patched_file.path
@@ -78,16 +138,19 @@ def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str
         if not file_content:
             continue
             
-        process_file_changes(
+        file_reviews = process_file_changes(
             file_path=file_path,
             file_content=file_content,
             hunks=patched_file,
             review_store=review_store,
-            agent=agent,
+            review_engine=review_engine,
             repo_root=repo_root
         )
+        all_reviews.extend(file_reviews)
+        
+    return all_reviews
 
-def process_file_changes(file_path, file_content, hunks, review_store, agent, repo_root):
+def process_file_changes(file_path, file_content, hunks, review_store, review_engine, repo_root) -> List[Review]:
     """
     Maps diff hunks to semantic symbols and triggers reviews.
     """
@@ -102,26 +165,31 @@ def process_file_changes(file_path, file_content, hunks, review_store, agent, re
     
     # Get all function definitions to map hunks
     definitions = treesitter.get_definitions("function")
+    new_reviews = []
     
-    for hunk in hunks:
-        # 2. Map hunk to symbol
-        # We use the target start line of the hunk
-        hunk_start = hunk.target_start
-        hunk_end = hunk.target_start + hunk.target_length
-        
-        matched_def = None
-        for definition in definitions:
-            # Tree-sitter uses 0-based indexing, diff uses 1-based
-            def_start = definition.node.start_point[0] + 1
-            def_end = definition.node.end_point[0] + 1
+    # Build the list of targets to review: either mapped from hunks, or all definitions if no hunks.
+    review_targets = []
+    if hunks:
+        for hunk in hunks:
+            hunk_start = hunk.target_start
+            hunk_end = hunk.target_start + hunk.target_length
             
-            # Check overlap
-            if (hunk_start <= def_end) and (hunk_end >= def_start):
-                matched_def = definition
-                break
-        
-        if not matched_def:
-            continue # Skip changes outside functions for now (or handle global scope later)
+            matched_def = None
+            for definition in definitions:
+                def_start = definition.node.start_point[0] + 1
+                def_end = definition.node.end_point[0] + 1
+                if (hunk_start <= def_end) and (hunk_end >= def_start):
+                    matched_def = definition
+                    break
+            
+            if matched_def:
+                review_targets.append((hunk, matched_def))
+    else:
+        # Standalone mode: Review all definitions in the file
+        for definition in definitions:
+            review_targets.append((None, definition))
+
+    for hunk, matched_def in review_targets:
 
         symbol_name = matched_def.name
         symbol_code = matched_def.source_code
@@ -151,86 +219,44 @@ def process_file_changes(file_path, file_content, hunks, review_store, agent, re
 
         if needs_review:
             # 5. Invoke Agent
-            perform_review(
-                agent=agent,
+            if hunk:
+                hunk_text, line_map = DiffUtils.format_hunk_with_virtual_lines(hunk)
+                method_text = symbol_code # Leave method without numbers so LLM focuses on hunk
+            else:
+                hunk_text = None
+                method_text, line_map = DiffUtils.format_code_with_virtual_lines(symbol_code, matched_def.node.start_point[0] + 1)
+
+            generated_items = review_engine.generate_reviews(
                 lang=lang.value,
-                code=symbol_code,
+                code=method_text,
                 file_path=file_path,
-                symbol_name=symbol_name,
+                hunk_text=hunk_text,
                 history=context_history,
-                review_store=review_store,
-                patch_fingerprint=patch_fingerprint,
-                ast_fingerprint=ast_fingerprint,
-                line_range=(matched_def.node.start_point[0] + 1, matched_def.node.end_point[0] + 1),
-                hunk=hunk
+                line_map=line_map
             )
 
-def perform_review(agent, lang, code, file_path, symbol_name, history, review_store, patch_fingerprint, ast_fingerprint, line_range, hunk=None):
-    try:
-        hunk_text = DiffUtils.format_hunk_with_line_numbers(hunk) if hunk else None
-        
-        if hunk_text:
-            request = (f"You are reviewing changes in `{file_path}`. "
-                       "The `diff_hunk` field contains the unified diff of modifications with line numbers. "
-                       "The `method` field contains the full function source after applying changes. "
-                       "Focus on issues introduced by the change (lines starting with +). "
-                       "Do not comment on parts of the code that were not changed. "
-                       "Return the result in JSON format using the schema provided. "
-                       "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
-        else:
-            request = ("Please review the entire method source provided for potential bugs, style violations, or performance issues. "
-                       "Return the result in JSON format using the schema provided. "
-                       "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
-
-        user_prompt = ReviewInputCode(
-            language=lang,
-            method=code,
-            file_path=file_path,
-            diff_hunk=hunk_text,
-            request=request
-        )
-        
-        # Inject history if available
-        # Note: Agent currently takes a single prompt string, so we might need to append history to the prompt
-        # or update the agent to handle conversation history explicitly.
-        # For now, we rely on the agent's internal state if it persists, or we'd append it here.
-        
-        agent.clear_history()
-        agent.set_format(ReviewListModel.json_schema())
-        
-        # TODO: Inject history into prompt text if Agent doesn't support it natively yet
-        
-        response = agent.call(user_prompt.model_dump_json())
-        response_json = json.loads(response)
-        reviews = ReviewListModel.validate_python(
-            response_json if isinstance(response_json, list) else []
-        )
-        
-        # Create or Update Review Object
-        anchor = ReviewAnchor(
-            file_path=file_path,
-            symbol_name=symbol_name,
-            symbol_type="function",
-            patch_fingerprint=patch_fingerprint,
-            ast_fingerprint=ast_fingerprint,
-            line_range_start=line_range[0],
-            line_range_end=line_range[1]
-        )
-        
-        existing_review = review_store.find_matching_review(file_path, symbol_name)
-        
-        if existing_review:
-            review = existing_review
-            review.anchor = anchor # Update anchor with new fingerprints/lines
-        else:
-            review = Review(anchor=anchor)
-        
-        for item in reviews:
-            print(f"[{item.type}] {file_path}:{item.line} - {item.description}")
-            review.add_bot_comment(f"[{item.type}] {item.description}\nSuggestion: {item.suggestion}")
-            
-        review_store.add_review(review)
-        
-    except Exception:
-        print(f"Error reviewing {symbol_name}")
-        traceback.print_exc()
+            if generated_items:
+                anchor = ReviewAnchor(
+                    file_path=file_path,
+                    symbol_name=symbol_name,
+                    symbol_type="function",
+                    patch_fingerprint=patch_fingerprint,
+                    ast_fingerprint=ast_fingerprint,
+                    line_range_start=matched_def.node.start_point[0] + 1,
+                    line_range_end=matched_def.node.end_point[0] + 1
+                )
+                
+                if existing_review:
+                    review = existing_review
+                    review.anchor = anchor # Update anchor with new fingerprints/lines
+                else:
+                    review = Review(anchor=anchor)
+                
+                for item in generated_items:
+                    print(f"[{item.type.value}] {file_path}:{item.line} - {item.description}")
+                    review.add_bot_comment(f"[{item.type.value}] {item.description}\nSuggestion: {item.suggestion}")
+                    
+                review_store.add_review(review)
+                new_reviews.append(review)
+                
+    return new_reviews

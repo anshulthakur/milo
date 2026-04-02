@@ -11,7 +11,7 @@ from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatu
 from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
 from unittest.mock import patch, MagicMock
-from milo.codereview.codereview import run_crab
+from milo.codereview.codereview import run_crab, ReviewEngine
 from milo.agents.tools import FetchSourceArgs, GetMetadataArgs
 from milo.codereview.models import CodeReview, DefectEnum
 
@@ -117,6 +117,50 @@ index 111..222 100644
         self.assertIn("  10   context", formatted) # 4 spaces for line number + 1 space + 1 prefix + 1 space + content
         self.assertIn("  11 - removed", formatted)
         self.assertIn("  11 + added", formatted)
+
+    def test_format_hunk_with_virtual_lines(self):
+        """Test that hunk lines are translated to 1-based sequential integers with a correct lookup map."""
+        diff_text = """
+diff --git a/file.py b/file.py
+index 111..222 100644
+--- a/file.py
++++ b/file.py
+@@ -10,2 +10,3 @@
+ context
+-removed
++added1
++added2
+"""
+        patch = PatchSet(diff_text.strip())
+        hunk = patch[0][0]
+        
+        formatted, line_map = DiffUtils.format_hunk_with_virtual_lines(hunk)
+        
+        # Virtual lines should be strictly 1-based sequential integers
+        self.assertIn("   1   context", formatted)
+        self.assertIn("   2 - removed", formatted)
+        self.assertIn("   3 + added1", formatted)
+        self.assertIn("   4 + added2", formatted)
+        
+        # Check exact mapping back to the actual target/source lines
+        self.assertEqual(line_map[1], 10)  # context line maps to 10
+        self.assertEqual(line_map[2], 11)  # removed line maps to source line 11
+        self.assertEqual(line_map[3], 11)  # added1 maps to target line 11
+        self.assertEqual(line_map[4], 12)  # added2 maps to target line 12
+
+    def test_format_code_with_virtual_lines(self):
+        """Test entire code blocks mapping 1-based integers to AST absolute lines."""
+        code = "def foo():\n    pass\n    return 0"
+        start_line = 45  # Let's pretend this function was defined at line 45 in the file
+        
+        formatted, line_map = DiffUtils.format_code_with_virtual_lines(code, start_line_no=start_line)
+        
+        self.assertIn("   1 | def foo():", formatted)
+        self.assertIn("   2 |     pass", formatted)
+        self.assertIn("   3 |     return 0", formatted)
+        
+        self.assertEqual(line_map[1], 45)
+        self.assertEqual(line_map[3], 47)
 
 class TestStateManager(unittest.TestCase):
     def setUp(self):
@@ -255,6 +299,42 @@ class TestLocalGitProvider(unittest.TestCase):
         # Test with absolute path (verifies relpath logic)
         content_abs = provider.get_file_content(str(self.file_path), 'index')
         self.assertEqual(content_abs, "line1\nline2\n")
+
+class TestReviewEngine(unittest.TestCase):
+    def test_virtual_line_translation(self):
+        """Verify ReviewEngine dynamically maps virtual line numbers and guards against hallucinated out-of-bound references."""
+        mock_agent = MagicMock()
+        
+        # Simulate LLM returning citations for virtual lines: 3 and 10
+        review_payload = [
+            CodeReview(type=DefectEnum.bug, file="app.py", line=3, description="Valid citation", suggestion="Fix").model_dump(),
+            CodeReview(type=DefectEnum.style, file="app.py", line=10, description="Hallucinated citation", suggestion="Fallback needed").model_dump()
+        ]
+        mock_agent.call.return_value = json.dumps(review_payload)
+        
+        engine = ReviewEngine(mock_agent)
+        
+        # Provide a synthetic line_map corresponding to what DiffUtils would generate
+        mock_line_map = {
+            1: 100,
+            2: 101,
+            3: 105, # Gap exists due to diff jumps
+            4: 106
+        }
+        
+        reviews = engine.generate_reviews(
+            lang="python",
+            code="def foo(): pass",
+            file_path="app.py",
+            hunk_text="+def foo(): pass",
+            line_map=mock_line_map
+        )
+        
+        self.assertEqual(len(reviews), 2)
+        # Virtual Line 3 should map strictly to actual line 105
+        self.assertEqual(reviews[0].line, 105)
+        # Virtual Line 10 hallucinated outside bounds; engine must fallback safely to the first tracked line (100)
+        self.assertEqual(reviews[1].line, 100)
 
 class TestFileSystemProvider(unittest.TestCase):
     def setUp(self):
@@ -476,6 +556,67 @@ class TestCrabIntegration(unittest.TestCase):
         # GetMetadataArgs
         meta_args = GetMetadataArgs(fn_name="main", file_path="app.py")
         self.assertEqual(meta_args.file_path, "app.py")
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    @patch('builtins.print')
+    def test_end_to_end_virtual_line_mapping(self, mock_print, mock_get_agent):
+        """
+        Comprehensive E2E test verifying changes translated into virtual diff hunks,
+        interpreted by an LLM mock on relative coordinates, and safely transformed back
+        to actual source target lines in the output thread state.
+        """
+        # 1. Establish an initial file so treesitter anchors exist
+        initial_code = (
+            "def calculate_tax(amount):\n"   # Line 1
+            "    tax = 0\n"                  # Line 2
+            "    if amount > 100:\n"         # Line 3
+            "        tax = amount * 0.2\n"   # Line 4
+            "    else:\n"                    # Line 5
+            "        tax = amount * 0.1\n"   # Line 6
+            "    return tax\n"               # Line 7
+        )
+        self.py_file_path.write_text(initial_code)
+        self.repo.index.add(["app.py"])
+        self.repo.index.commit("Add calculate_tax")
+
+        # 2. Modify the file to trigger a Git Diff hunk
+        modified_code = (
+            "def calculate_tax(amount):\n"   
+            "    tax = 0\n"                  
+            "    if amount > 100:\n"         
+            "        tax = amount * 0.3\n"   # Line 4 (Changed target)
+            "    else:\n"                    
+            "        tax = amount * 0.0\n"   # Line 6 (Changed target)
+            "    return tax\n"               
+        )
+        self.py_file_path.write_text(modified_code)
+        self.repo.index.add(["app.py"])
+        self.repo.index.commit("Modify tax rates")
+
+        # 3. Simulate the agent pointing at virtual diff coordinates
+        # In the resulting unified diff, virtual line 5 aligns with target line 4
+        # and virtual line 8 aligns with target line 6.
+        mock_agent_instance = MagicMock()
+        mock_get_agent.return_value = mock_agent_instance
+        
+        review_payload = [
+            CodeReview(type=DefectEnum.bug, file="app.py", line=5, description="High tax rate", suggestion="Fix").model_dump(),
+            CodeReview(type=DefectEnum.bug, file="app.py", line=8, description="Zero tax rate", suggestion="Fix").model_dump()
+        ]
+        mock_agent_instance.call.return_value = json.dumps(review_payload)
+
+        file_manager = LocalGitProvider(str(self.repo_path))
+        
+        # Execute code review orchestrator
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
+
+        # 4. Verify Final State captures mapped lines (4 and 6), NOT virtual lines (5 and 8)
+        printed_messages = [call.args[0] for call in mock_print.call_args_list if isinstance(call.args[0], str)]
+        
+        self.assertTrue(any("[bug] app.py:4 - High tax rate" in msg for msg in printed_messages),
+                        "Failed to translate virtual line 5 to actual target line 4.")
+        self.assertTrue(any("[bug] app.py:6 - Zero tax rate" in msg for msg in printed_messages),
+                        "Failed to translate virtual line 8 to actual target line 6.")
 
 class TestCrabCoverageMocked(unittest.TestCase):
     def setUp(self):

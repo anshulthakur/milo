@@ -1,6 +1,6 @@
 import hashlib
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
 from unidiff import Hunk
 from tree_sitter import Node
 
@@ -55,6 +55,51 @@ class DiffUtils:
             # Format: 4-digit line number, prefix, value
             lines.append(f"{line_no if line_no else 0:4} {prefix} {line.value}")
         return "".join(lines)
+
+    @staticmethod
+    def format_hunk_with_virtual_lines(hunk: Hunk) -> Tuple[str, Dict[int, int]]:
+        """
+        Formats a hunk with 1-based virtual line numbers for the LLM,
+        and returns a mapping back to the actual target line numbers.
+        """
+        lines = []
+        line_map = {}
+        virtual_line = 1
+        
+        for line in hunk:
+            if line.is_added:
+                prefix = "+"
+                actual_line = line.target_line_no
+            elif line.is_removed:
+                prefix = "-"
+                actual_line = line.source_line_no
+            else:
+                prefix = " "
+                actual_line = line.target_line_no or line.source_line_no or 0
+            
+            lines.append(f"{virtual_line:4} {prefix} {line.value}")
+            if actual_line is not None:
+                 line_map[virtual_line] = actual_line
+            virtual_line += 1
+            
+        return "".join(lines), line_map
+
+    @staticmethod
+    def format_code_with_virtual_lines(code: str, start_line_no: int) -> Tuple[str, Dict[int, int]]:
+        """
+        Formats an entire code block with 1-based virtual line numbers for the LLM,
+        and returns a mapping back to the actual line numbers in the file.
+        """
+        lines = []
+        line_map = {}
+        virtual_line = 1
+        
+        for i, line_text in enumerate(code.splitlines(keepends=True)):
+            lines.append(f"{virtual_line:4} | {line_text}")
+            line_map[virtual_line] = start_line_no + i
+            virtual_line += 1
+            
+        return "".join(lines), line_map
 
     @staticmethod
     def compute_patch_fingerprint(hunk: Hunk) -> str:
