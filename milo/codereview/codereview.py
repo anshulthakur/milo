@@ -1,14 +1,14 @@
 import os
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import traceback
 
 from milo.codesift.repograph import create_repograph
 from milo.agents.codereview import get_agent as get_codereview_agent
 from milo.codesift.parsers.languages import (get_file_extension, get_programming_language, guess_extension_from_shebang)
 from milo.codesift.parsers import supported_languages, Treesitter
-from milo.codereview.models import ReviewListModel, ReviewInputCode
+from milo.codereview.models import ReviewListModel, ReviewInputCode, CodeReview
 from milo.codereview.diff import DiffUtils
 from milo.utils.vcs import FileManager
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
@@ -146,11 +146,17 @@ def run_crab(file_manager: Optional[FileManager] = None, repo_root: Optional[str
             review_engine=review_engine,
             repo_root=repo_root
         )
-        all_reviews.extend(file_reviews)
+        
+        for review, generated_items in file_reviews:
+            for item in generated_items:
+                print(f"[{item.type.value}] {file_path}:{item.line} - {item.description}")
+                review.add_bot_comment(f"[{item.type.value}] {item.description}\nSuggestion: {item.suggestion}")
+            review_store.add_review(review)
+            all_reviews.append(review)
         
     return all_reviews
 
-def process_file_changes(file_path, file_content, hunks, review_store, review_engine, repo_root) -> List[Review]:
+def process_file_changes(file_path, file_content, hunks, review_store, review_engine, repo_root, force_review: bool = False) -> List[Tuple[Review, List[CodeReview]]]:
     """
     Maps diff hunks to semantic symbols and triggers reviews.
     """
@@ -158,7 +164,7 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
     extension = get_file_extension(file_path)
     lang = get_programming_language(extension)
     if lang.value not in supported_languages():
-        return
+        return []
 
     treesitter = Treesitter.create_treesitter(lang)
     treesitter.parse(file_content.encode('utf-8'))
@@ -260,7 +266,7 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
         
         if existing_review:
             # Check if AST changed since last review
-            if existing_review.anchor.ast_fingerprint == ast_fingerprint:
+            if existing_review.anchor.ast_fingerprint == ast_fingerprint and not force_review:
                 print(f"Skipping {symbol_name} (AST unchanged)")
                 continue
             else:
@@ -306,11 +312,6 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
                 else:
                     review = Review(anchor=anchor)
                 
-                for item in generated_items:
-                    print(f"[{item.type.value}] {file_path}:{item.line} - {item.description}")
-                    review.add_bot_comment(f"[{item.type.value}] {item.description}\nSuggestion: {item.suggestion}")
-                    
-                review_store.add_review(review)
-                new_reviews.append(review)
+                new_reviews.append((review, generated_items))
                 
     return new_reviews
