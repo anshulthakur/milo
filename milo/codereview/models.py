@@ -20,6 +20,18 @@ class CodeReview(BaseModel):
 ReviewList: TypeAlias = list[CodeReview]
 ReviewListModel = TypeAdapter(ReviewList)
 
+class VerificationStatus(str, Enum):
+    OPEN = "OPEN"
+    RESOLVED = "RESOLVED"
+
+class VerificationResult(BaseModel):
+    id: str
+    status: VerificationStatus
+    reason: str
+
+VerificationListModel = TypeAdapter(list[VerificationResult])
+
+
 class ReviewInputCode(BaseModel):
     language: str
     method: str

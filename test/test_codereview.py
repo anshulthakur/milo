@@ -407,7 +407,12 @@ class TestCrabIntegration(unittest.TestCase):
                 suggestion="Use a constant"
             ).model_dump()
         ]
-        mock_agent_instance.call.return_value = json.dumps(review_payload)
+        
+        def agent_side_effect(payload):
+            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+                return json.dumps([])
+            return json.dumps(review_payload)
+        mock_agent_instance.call.side_effect = agent_side_effect
 
         # 2. Modify a file and commit
         self.py_file_path.write_text("def main():\n    print('hello world') # changed\n")
@@ -454,13 +459,13 @@ class TestCrabIntegration(unittest.TestCase):
 
         run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
         
-        # Agent should be called again because AST fingerprint changed.
-        mock_agent_instance.call.assert_called_once()
+        # Agent should be called TWICE because AST fingerprint changed (Phase 1 + Phase 2).
+        self.assertEqual(mock_agent_instance.call.call_count, 2)
         
         # Verify the anchor was updated
         store.load()
         updated_reviews = store.get_reviews_by_file("app.py")
-        self.assertEqual(len(updated_reviews), 1)
+        self.assertEqual(len(updated_reviews), 2)
         self.assertNotEqual(original_ast_fingerprint, updated_reviews[0].anchor.ast_fingerprint)
 
     @patch('milo.codereview.codereview.get_codereview_agent')
@@ -478,7 +483,12 @@ class TestCrabIntegration(unittest.TestCase):
                 suggestion="Use a more descriptive name"
             ).model_dump()
         ]
-        mock_agent_instance.call.return_value = json.dumps(review_payload)
+        
+        def agent_side_effect(payload):
+            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+                return json.dumps([])
+            return json.dumps(review_payload)
+        mock_agent_instance.call.side_effect = agent_side_effect
 
         file_manager = FileSystemProvider(str(self.standalone_path))
         # 2. Run CRAB in standalone mode for the first time
@@ -502,12 +512,12 @@ class TestCrabIntegration(unittest.TestCase):
         # 5. Modify the file and run again
         self.standalone_file.write_text("def process_data():\n    # changed\n    return 2\n")
         run_crab(file_manager=file_manager, repo_root=str(self.standalone_path), files=[str(self.standalone_file)])
-        mock_agent_instance.call.assert_called_once()
+        self.assertEqual(mock_agent_instance.call.call_count, 2)
 
         # Check that the review was updated
         store.load()
         updated_reviews = store.get_reviews_by_file(rel_file_path)
-        self.assertEqual(len(updated_reviews), 1)
+        self.assertEqual(len(updated_reviews), 2)
         self.assertNotEqual(original_ast_fingerprint, updated_reviews[0].anchor.ast_fingerprint)
 
     @patch('milo.codereview.codereview.get_codereview_agent')
@@ -524,7 +534,12 @@ class TestCrabIntegration(unittest.TestCase):
                 suggestion="Fix staged change"
             ).model_dump()
         ]
-        mock_agent_instance.call.return_value = json.dumps(review_payload)
+        
+        def agent_side_effect(payload):
+            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+                return json.dumps([])
+            return json.dumps(review_payload)
+        mock_agent_instance.call.side_effect = agent_side_effect
 
         # 2. Modify a file and STAGE it, but do not commit
         self.py_file_path.write_text("def main():\n    print('staged change')\n")
@@ -769,7 +784,11 @@ class TestCrabCoverageMocked(unittest.TestCase):
                 suggestion="Fix it"
             ).model_dump()
         ]
-        mock_agent.call.return_value = json.dumps(review_payload)
+        def agent_side_effect(payload):
+            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+                return json.dumps([])
+            return json.dumps(review_payload)
+        mock_agent.call.side_effect = agent_side_effect
         return mock_agent
 
     @patch('milo.codereview.codereview.get_codereview_agent')

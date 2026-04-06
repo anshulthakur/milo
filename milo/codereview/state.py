@@ -111,6 +111,13 @@ class ReviewStore:
             results = [r for r in results if r.status == status]
         return results
     
+    def get_open_reviews_for_symbol(self, file_path: str, symbol_name: Optional[str]) -> List[Review]:
+        """Retrieves all OPEN reviews for a specific file and symbol."""
+        return [
+            r for r in self.reviews.values() 
+            if r.status == ReviewStatus.OPEN and r.anchor.file_path == file_path and r.anchor.symbol_name == symbol_name
+        ]
+
     def find_matching_review(self, file_path: str, symbol_name: Optional[str]) -> Optional[Review]:
         """
         Finds an existing OPEN review that matches the file and symbol name.
