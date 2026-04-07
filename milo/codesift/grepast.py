@@ -4,6 +4,7 @@ from grep_ast.grep_ast import TreeContext
 from pathlib import Path
 import pathspec
 import traceback
+from git import Repo
 
 
 def lookup_file(filename, pattern, options=None):
@@ -76,9 +77,25 @@ def grep_ast(
         4. Returns a dictionary with empty results if no matches are found.
     """
     try:
-        if not repo_path:
-            repo_path = "."
+        git_root = None
+        try:
+            repo = Repo(".", search_parent_directories=True)
+            git_root = repo.working_tree_dir
+        except Exception:
+            pass
 
+        if not repo_path:
+            if git_root:
+                repo_path = git_root
+            else:
+                repo_path = "."
+        elif git_root:
+            resolved_repo_path = str(Path(repo_path).resolve())
+            resolved_git_root = str(Path(git_root).resolve())
+            if resolved_repo_path != resolved_git_root:
+                print(f"Anomaly: Provided repo_path '{resolved_repo_path}' does not match git root '{resolved_git_root}'. Using provided repo_path.")
+
+        print(f'Grep: repo path: {repo_path}')
         parent = Path(repo_path).resolve()
         gitignore = None
         potential_gitignore = parent / ".gitignore"

@@ -214,14 +214,11 @@ class Agent:
                 # Arguments are a JSON string in the OpenAI response
                 arguments = json.loads(call["function"].get("arguments", "{}"))
                 tool = self.tools[tool_name]
-
-                print(f"Calling tool: {tool_name}")
                 
                 # Validate and parse arguments via Pydantic
                 args_obj = tool.schema(**arguments)
-                print(f"args: {args_obj}")
                 result = tool.func(**args_obj.model_dump())
-                print(f"Called tool")
+                print(f"Calling tool: {tool_name}. args: {args_obj}")
                 print(result)
                 results.append({"tool": tool_name, "result": result})
 
