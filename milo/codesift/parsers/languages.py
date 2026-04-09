@@ -152,7 +152,7 @@ def guess_extension_from_shebang(file_path=None, file_content=None) -> str:
         else:
             first_line = file_content.splitlines()[0].strip()
 
-        print(first_line)
+        #print(first_line)
         if not first_line.startswith("#!"):
             return ''
 
