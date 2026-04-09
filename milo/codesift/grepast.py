@@ -78,8 +78,9 @@ def grep_ast(
     """
     try:
         git_root = None
+        search_path = repo_path if repo_path else "."
         try:
-            repo = Repo(".", search_parent_directories=True)
+            repo = Repo(search_path, search_parent_directories=True)
             git_root = repo.working_tree_dir
         except Exception:
             pass

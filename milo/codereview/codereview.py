@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 import traceback
+import re
 
 from milo.codesift.repograph import create_repograph
 from milo.agents.codereview import get_agent as get_codereview_agent
@@ -12,6 +13,20 @@ from milo.codereview.models import ReviewListModel, ReviewInputCode, CodeReview,
 from milo.codereview.diff import DiffUtils
 from milo.utils.vcs import FileManager
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
+
+def _translate_virtual_lines(text: str, line_map: Dict[int, int]) -> str:
+    if not text or not line_map:
+        return text
+        
+    def match_replacer(m):
+        def num_replacer(num_match):
+            v_line = int(num_match.group(0))
+            return str(line_map.get(v_line, v_line))
+        return re.sub(r'\d+', num_replacer, m.group(0))
+        
+    # Intercept variants like "line X", "lines X-Y", "lines X, Y, and Z"
+    pattern = r'\b(?:line|lines)\s+\d+(?:\s*(?:-|to|and|,)\s*\d+)*\b'
+    return re.sub(pattern, match_replacer, text, flags=re.IGNORECASE)
 
 class ReviewEngine:
     """
@@ -33,14 +48,16 @@ class ReviewEngine:
                        "The `diff_hunk` field contains the unified diff of modifications with line numbers on the left. "
                        "The `method` field contains the full function source after applying changes. "
                        f"Below is a JSON list of previously identified, currently OPEN issues for this function:\n{issues_json}\n"
-                       "Review the new code and determine if the developer has resolved them. "
-                       "Output a JSON array containing the `id`, the new `status` (OPEN or RESOLVED), and a `reason`.")
+                       "Review the new code and determine if the developer has resolved them.\n"
+                       "Output a JSON array containing the `id`, the new `status` (OPEN or RESOLVED), and a `reason`.\n"
+                       "IMPORTANT: Do NOT mention the virtual line numbers from the diff in your `reason`. Reference code snippets or variable names directly instead.")
         else:
             request = (f"You are reviewing changes in `{file_path}`. "
                        "The `method` field contains the full function source after applying changes. "
                        f"Below is a JSON list of previously identified, currently OPEN issues for this function:\n{issues_json}\n"
-                       "Review the new code and determine if the developer has resolved them. "
-                       "Output a JSON array containing the `id`, the new `status` (OPEN or RESOLVED), and a `reason`.")
+                       "Review the new code and determine if the developer has resolved them.\n"
+                       "Output a JSON array containing the `id`, the new `status` (OPEN or RESOLVED), and a `reason`.\n"
+                       "IMPORTANT: Do NOT mention the virtual line numbers from the code in your `reason`. Reference code snippets or variable names directly instead.")
 
         user_prompt = ReviewInputCode(
             language=lang,
@@ -77,14 +94,18 @@ class ReviewEngine:
                            "Analyze both added (+) and removed (-) lines. If removing code introduces a bug, report it, "
                            "but always anchor the line number of your feedback to a nearby added (+) or context ( ) line that still exists in the new code. "
                            "Do not comment on parts of the code that were not changed. "
-                           "When returning the line number, use the line number listed on the left side of the diff_hunk. "
+                           "When returning the line number, use the line number listed on the left side of the diff_hunk.\n"
+                           "IMPORTANT: Do NOT mention the virtual line numbers in the `description` or `suggestion` fields. Reference the code snippets or variable names directly instead.\n"
+                           "IMPORTANT: ONLY report actual defects, vulnerabilities, or required improvements. Do NOT report positive feedback, code explanations, or 'no action needed' comments. If there are no issues, return an empty array `[]`.\n"
                            f"{known_issues_text}\n"
                            "Return the result in JSON format using the schema provided. "
                            "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
             else:
                 request = ("Please review the entire method source provided for potential bugs, style violations, or performance issues. "
                            "The method code is provided with line numbers on the left. "
-                           "When returning the line number, use the line number listed on the left side of the method code. "
+                           "When returning the line number, use the line number listed on the left side of the method code.\n"
+                           "IMPORTANT: Do NOT mention the virtual line numbers in the `description` or `suggestion` fields. Reference the code snippets or variable names directly instead.\n"
+                           "IMPORTANT: ONLY report actual defects, vulnerabilities, or required improvements. Do NOT report positive feedback, code explanations, or 'no action needed' comments. If there are no issues, return an empty array `[]`.\n"
                            f"{known_issues_text}\n"
                            "Return the result in JSON format using the schema provided. "
                            "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
@@ -111,6 +132,8 @@ class ReviewEngine:
                     # Map the LLM's virtual line back to the actual line number
                     # If LLM hallucinates a line, fallback to the first mapped line
                     review.line = line_map.get(review.line, fallback_line)
+                    review.description = _translate_virtual_lines(review.description, line_map)
+                    review.suggestion = _translate_virtual_lines(review.suggestion, line_map)
             
             return reviews
         except Exception:
