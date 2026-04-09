@@ -75,7 +75,7 @@ class ReviewStore:
         """Loads reviews from the storage file."""
         if self.storage_path.exists():
             try:
-                with open(self.storage_path, 'r') as f:
+                with open(self.storage_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     # Handle list of reviews
                     if isinstance(data, list):
@@ -93,8 +93,8 @@ class ReviewStore:
         if not self.storage_path.parent.exists():
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(self.storage_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        with open(self.storage_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
     def add_review(self, review: Review):
         """Adds or updates a review in the store."""
