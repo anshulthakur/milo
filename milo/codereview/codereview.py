@@ -250,6 +250,9 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
     review_targets = []
     if hunks:
         for hunk in hunks:
+            if not hunk:
+                #Hunk may be none (seen in some cases)
+                continue
             hunk_start = hunk.target_start
             hunk_end = hunk.target_start + hunk.target_length
             
