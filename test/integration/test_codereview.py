@@ -10,7 +10,6 @@ from milo.utils.vcs import LocalGitProvider, FileSystemProvider
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
-from unittest.mock import patch, MagicMock
 from milo.codereview.codereview import run_crab
 from milo.codereview.models import CodeReview, DefectEnum
 
@@ -54,7 +53,7 @@ class TestCrabIntegration(unittest.TestCase):
         review comments from the ReviewStore for inspection.
         """
         # 1. Modify a file to introduce a reviewable issue
-        self.py_file_path.write_text("def main():\n    password = '12345' # Bad practice\n    print('hello')\n")
+        self.py_file_path.write_text("def main():\n    password = '12345'\n    print('hello')\n")
         self.repo.index.add(["app.py"])
         self.repo.index.commit("Add insecure password")
 
@@ -89,6 +88,52 @@ class TestCrabIntegration(unittest.TestCase):
         self.assertEqual(reviews[0].anchor.symbol_name, "main")
         self.assertGreater(len(reviews[0].conversation), 0, "The saved review has no comments.")
 
+    def test_run_crab_e2e_tools_no_mocks(self):
+        """
+        Exploratory end-to-end test that encourages the LLM to use tools.
+        We simulate a change that references a function in another file,
+        prompting the agent to look up that function to verify usage.
+        """
+        # 1. Create a helper file
+        helper_file = self.repo_path / "auth_helper.py"
+        helper_file.write_text("def verify_token(token, user_id):\n    return token == 'super_secret' and user_id == 1\n")
+        self.repo.index.add(["auth_helper.py"])
+        self.repo.index.commit("Add auth helper")
+
+        # 2. Modify app.py to use this helper improperly
+        self.py_file_path.write_text("from auth_helper import verify_token\n\ndef main(user_token):\n    if verify_token(1, user_token):\n        print('Logged in')\n")
+        self.repo.index.add(["app.py"])
+        self.repo.index.commit("Use auth helper in main")
+
+        # 3. Run CRAB in git mode. 
+        print("\n--- Running CRAB E2E (Tools Triggered) ---")
+        file_manager = LocalGitProvider(str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
+        
+        # 4. Load the review store to inspect
+        review_store_path = self.repo_path / ".milo" / "reviews.json"
+        self.assertTrue(review_store_path.exists(), "Review store file was not created.")
+        store = ReviewStore(review_store_path)
+        
+        reviews = list(store.reviews.values())
+
+        # 5. Print the saved reviews
+        print("\n--- Saved Reviews from Tool-Triggered Run ---")
+        if not reviews:
+            print("No reviews found in the store.")
+        for review in reviews:
+            print(f"Review ID: {review.id}")
+            print(f"  File: {review.anchor.file_path}")
+            print(f"  Symbol: {review.anchor.symbol_name}")
+            print(f"  Status: {review.status.value}")
+            print("  Conversation:")
+            for comment in review.conversation:
+                print(f"    - {comment.role.upper()}: {comment.content.strip()}")
+            print("-" * 20)
+        print("--------------------------------------------\n")
+
+        self.assertGreater(len(reviews), 0, "No reviews were saved to the store.")
+
     def test_run_crab_e2e_standalone_mixed_languages(self):
         """
         Exploratory end-to-end test for run_crab in standalone mode (no git).
@@ -106,7 +151,7 @@ class TestCrabIntegration(unittest.TestCase):
 
 void process_input(char *input) {
     char buffer[10];
-    strcpy(buffer, input); // Buffer overflow vulnerability
+    strcpy(buffer, input);
     printf("Processed: %s", buffer);
 }
 """, encoding='utf-8')
@@ -115,7 +160,7 @@ void process_input(char *input) {
         py_file = standalone_dir / "script.py"
         py_file.write_text("""
 def connect_db():
-    password = "password123" # Hardcoded credential
+    password = "password123"
     print("Connecting...")
 """, encoding='utf-8')
 

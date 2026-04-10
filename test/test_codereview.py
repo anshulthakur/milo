@@ -14,6 +14,9 @@ from unittest.mock import patch, MagicMock
 from milo.codereview.codereview import run_crab, ReviewEngine
 from milo.agents.tools import FetchSourceArgs, GetMetadataArgs
 from milo.codereview.models import CodeReview, DefectEnum
+from milo.agents.baseagent import Agent
+from milo.agents.tools import Tool
+from pydantic import BaseModel
 
 
 class TestDiffUtils(unittest.TestCase):
@@ -737,6 +740,191 @@ class TestCrabIntegration(unittest.TestCase):
         self.assertIn("func1", symbol_names)
         self.assertIn("func2", symbol_names)
 
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_hunk_matching_dpdk_c_fragment(self, mock_get_agent):
+        """
+        Test case to reproduce the specific DPDK-style C fragment parsing issue,
+        checking if macros or syntax errors drop the function definition from the AST.
+        """
+        c_file_path = self.repo_path / "main.c"
+        
+        initial_code = (
+            '#include "npf/wigw/wigw_init.h"\n'
+            '#include "ip_icmp.h"\n\n'
+            'packet_input_t packet_input_func __hot_data = ether_input_no_dyn_feats;\n\n'
+            'static inline bool forwarding_lcore(const struct lcore_conf *conf)\n'
+            '{\n'
+            '\treturn !bitmask_isempty(&conf->portmask);\n'
+            '}\n\n'
+            'static inline\n'
+            'bool forwarding_or_crypto_engine_lcore(const struct lcore_conf *conf)\n'
+            '{\n'
+            '\treturn conf->do_crypto || forwarding_lcore(conf);\n'
+            '}\n\n'
+            '/* Free any packets left in the rings or bursts */\n'
+            'void pkt_ring_empty(portid_t port)\n'
+            '{\n'
+            '\tstruct rte_ring *ring;\n'
+            '\tstruct rte_mbuf *m;\n'
+            '\tunsigned int lcore;\n'
+            '\tuint8_t r;\n\n'
+            '\tfor (r = 0; r < port_config[port].max_rings; r++) {\n'
+            '\t\tring = port_config[port].pkt_ring[r];\n\n'
+            '\t\twhile (rte_ring_sc_dequeue(ring, (void **)&m) == 0)\n'
+            '\t\t\trte_pktmbuf_free(m);\n'
+            '\t}\n'
+            '}\n\n'
+            '/* Check for packets from network ports */\n'
+            'static void __hot_func\n'
+            'poll_receive_queues(struct lcore_conf *conf)\n'
+            '{\n'
+            '\tstruct crypto_pkt_buffer *cpb = RTE_PER_LCORE(crypto_pkt_buffer);\n'
+            '\tuint16_t high_rxq;\n'
+            '\tunsigned int i;\n\n'
+            '\thigh_rxq = CMM_LOAD_SHARED(conf->high_rxq);\n'
+            '\tfor (i = 0; i < high_rxq; i++) {\n'
+            '\t\tstruct lcore_rx_queue *rxq = &conf->rx_poll[i];\n'
+            '\t\tstruct rte_mbuf *rx_pkts[RX_PKT_BURST];\n'
+            '\t\tportid_t portid;\n'
+            '\t\tuint16_t nb;\n\n'
+            '\t\tportid = CMM_LOAD_SHARED(rxq->portid);\n\n'
+            '\t\t/* port unused or not up yet? */\n'
+            '\t\tif (unlikely(portid == NO_OWNER) ||\n'
+            '\t\t    unlikely(!bitmask_isset(&active_port_mask, portid)))\n'
+            '\t\t\tcontinue;\n'
+            '\t}\n'
+            '}\n'
+        )
+
+        c_file_path.write_text(initial_code)
+        self.repo.index.add(["main.c"])
+        self.repo.index.commit("Initial commit main.c")
+
+        modified_code = (
+            '#include "npf/wigw/wigw_init.h"\n'
+            '#include "ip_icmp.h"\n\n'
+            '#include <stdio.h>\n'
+            '#include checkcheckech\n\n'
+            'packet_input_t packet_input_func __hot_data = ether_input_no_dyn_feats;\n\n'
+            'static inline bool forwarding_lcore(const struct lcore_conf *conf)\n'
+            '{\n'
+            '\treturn !bitmask_isempty(&conf->portmask);\n'
+            '}\n\n'
+            'static inline\n'
+            'bool forwarding_or_crypto_engine_lcore(const struct lcore_conf *conf)\n'
+            '{\n'
+            '\treturn conf->do_crypto || forwarding_lcore(conf);\n'
+            '}\n\n'
+            '/* Free any packets left in the rings or bursts */\n'
+            'void pkt_ring_emptied(portid_t port)\n'
+            '{\n'
+            '\tstruct rte_ring *ring;\n'
+            '\tstruct rte_mbuf *m;\n'
+            '\tunsigned int lcore;\n'
+            '\tuint8_t r;\n\n'
+            '\tfor (r = 0; r < port_config[port].max_rings; r++) {\n'
+            '\t\tring = port_config[port].pkt_ring[r];\n\n'
+            '\t\twhile (rte_ring_sc_dequeue(ring, (void **)&m) == 0)\n'
+            '\t\t\trte_pktmbuf_free(m);\n'
+            '\t}\n'
+            '}\n\n'
+            '/* Check for packets from network ports */\n'
+            'static void __hot_func\n'
+            'poll_receive_queues(struct lcore_conf *conf)\n'
+            '{\n'
+            '\tstruct crypto_pkt_buffer *cpb = RTE_PER_LCORE(crypto_pkt_buffer);\n'
+            '\tuint16_t high_rxq;\n'
+            '\tunsigned int i;\n'
+            '\tint port_id;\n\n'
+            '\thigh_rxq = CMM_LOAD_SHARED(conf->high_rxq);\n'
+            '\tfor (i = 0; i < high_rxq; i++) {\n'
+            '\t\tstruct lcore_rx_queue *rxq = &conf->rx_poll[i];\n'
+            '\t\tstruct rte_mbuf *rx_pkts[RX_PKT_BURST];\n'
+            '\t\tportid_t portid;\n'
+            '\t\tuint16_t nb;\n\n'
+            '\t\tportid = CMM_LOAD_SHARED(rxq->portid);\n\n'
+            '\t\tport_id = 0;\n\n'
+            '\t\t/* port unused or not up yet? */\n'
+            '\t\tif (unlikely(portid == NO_OWNER) ||\n'
+            '\t\t    unlikely(!bitmask_isset(&active_port_mask, portid)))\n'
+            '\t\t\tcontinue;\n'
+            '\t}\n'
+            '}\n'
+        )
+
+        c_file_path.write_text(modified_code)
+        self.repo.index.add(["main.c"])
+        self.repo.index.commit("Modify main.c")
+
+        mock_agent_instance = MagicMock()
+        mock_get_agent.return_value = mock_agent_instance
+        review_payload = [CodeReview(type=DefectEnum.bug, file="main.c", line=5, description="Test issue", suggestion="Fix").model_dump()]
+        mock_agent_instance.call.return_value = json.dumps(review_payload)
+
+        file_manager = LocalGitProvider(str(self.repo_path))
+        
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
+
+        store = ReviewStore(self.repo_path / ".milo" / "reviews.json")
+        reviews = store.get_reviews_by_file("main.c")
+        
+        symbol_names = [r.anchor.symbol_name for r in reviews]
+        
+        print(f"\n[DEBUG] Evaluated Symbols: {symbol_names}\n")
+        
+        # Test will fail if it matched the previous context function due to Tree-sitter AST dropping `pkt_ring_emptied`
+        self.assertNotIn("forwarding_or_crypto_engine_lcore", symbol_names, "Incorrectly anchored to the context function!")
+        self.assertIn("pkt_ring_emptied", symbol_names, "Failed to map changes to pkt_ring_emptied")
+
+    @patch('milo.codereview.codereview.get_codereview_agent')
+    def test_hunk_matching_full_dpdk_file(self, mock_get_agent):
+        """
+        Test case using the full test.c file to reproduce the exact DPDK-style 
+        C parsing issue and verify the proximity matching behavior on a real codebase size.
+        """
+        test_c_path = Path(__file__).parent / "test.c"
+        if not test_c_path.exists():
+            self.skipTest("test.c not found")
+            
+        modified_code = test_c_path.read_text(encoding='utf-8')
+        
+        # Reconstruct the original code to form the base commit
+        initial_code = modified_code.replace('#include <stdio.h>\n#include checkcheckech\n', '')
+        initial_code = initial_code.replace('void pkt_ring_emptied(portid_t port)', 'void pkt_ring_empty(portid_t port)')
+        initial_code = initial_code.replace('\tint port_id;\n', '')
+        initial_code = initial_code.replace('\t\tport_id = 0;\n', '')
+
+        # 1. Setup git repo
+        c_file_path = self.repo_path / "test.c"
+        c_file_path.write_text(initial_code)
+        self.repo.index.add(["test.c"])
+        self.repo.index.commit("Initial commit test.c")
+
+        # 2. Apply modifications
+        c_file_path.write_text(modified_code)
+        self.repo.index.add(["test.c"])
+        self.repo.index.commit("Modify test.c")
+
+        # 3. Setup mock agent
+        mock_agent_instance = MagicMock()
+        mock_get_agent.return_value = mock_agent_instance
+        review_payload = [CodeReview(type=DefectEnum.bug, file="test.c", line=515, description="Test issue", suggestion="Fix").model_dump()]
+        mock_agent_instance.call.return_value = json.dumps(review_payload)
+
+        # 4. Run CRAB
+        file_manager = LocalGitProvider(str(self.repo_path))
+        run_crab(file_manager=file_manager, repo_root=str(self.repo_path))
+
+        # 5. Assertions
+        store = ReviewStore(self.repo_path / ".milo" / "reviews.json")
+        reviews = store.get_reviews_by_file("test.c")
+        
+        symbol_names = [r.anchor.symbol_name for r in reviews]
+        print(f"\n[DEBUG] Full file Evaluated Symbols: {symbol_names}\n")
+        
+        self.assertIn("pkt_ring_emptied", symbol_names, "Failed to map changes to pkt_ring_emptied")
+        self.assertIn("poll_receive_queues", symbol_names, "Failed to map changes to poll_receive_queues")
+
 class TestCrabCoverageMocked(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = Path('/tmp/crab_coverage').resolve()
@@ -860,6 +1048,164 @@ class TestCrabCoverageMocked(unittest.TestCase):
         store = ReviewStore(self.nogit_dir / ".milo" / "reviews.json")
         self.assertEqual(len(store.get_reviews_by_file("script1.py")), 1)
         self.assertEqual(len(store.get_reviews_by_file("script2.py")), 0)
+
+
+class MockGrepArgs(BaseModel):
+    query: str
+
+
+class TestAgentReasoningAndCondensation(unittest.TestCase):
+    @patch('milo.agents.baseagent.OpenAI')
+    def test_end_to_end_reasoning_and_condensation(self, mock_openai):
+        """
+        Verifies that <think> tags are extracted from the LLM's response,
+        stripped from the main content to save history tokens, and successfully
+        passed as 'reflective_thinking' to the ToolSummaryAgent when a tool
+        returns a massive payload.
+        """
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        
+        # 1. Main agent's first response: a tool call + thinking
+        tool_call_message = MagicMock()
+        tool_call_message.role = "assistant"
+        tool_call_message.content = "<think>\nI must find this using grep.\n</think>"
+        tool_call_message.reasoning_content = None
+        
+        mock_tc = MagicMock()
+        mock_tc.id = "call_abc123"
+        mock_tc.type = "function"
+        mock_tc.function.name = "grep_keyword"
+        mock_tc.function.arguments = '{"query": "test"}'
+        tool_call_message.tool_calls = [mock_tc]
+        
+        # 2. ToolSummaryAgent's response: condensed summary (simulated JSON output)
+        condensation_message = MagicMock()
+        condensation_message.role = "assistant"
+        condensation_message.content = '```json\n{"summary": "Condensed grep output."}\n```'
+        condensation_message.reasoning_content = None
+        condensation_message.tool_calls = None
+        
+        # 3. Main agent's final response: final JSON array + thinking
+        final_message = MagicMock()
+        final_message.role = "assistant"
+        final_message.content = "<think>\nNow I know the answer.\n</think>\n```json\n[]\n```"
+        final_message.reasoning_content = None
+        final_message.tool_calls = None
+        
+        mock_response_1 = MagicMock(choices=[MagicMock(message=tool_call_message)])
+        mock_response_1.usage.total_tokens = 100
+        mock_response_2 = MagicMock(choices=[MagicMock(message=condensation_message)])
+        mock_response_2.usage.total_tokens = 50
+        mock_response_3 = MagicMock(choices=[MagicMock(message=final_message)])
+        mock_response_3.usage.total_tokens = 100
+        
+        mock_client.chat.completions.create.side_effect = [
+            mock_response_1, mock_response_2, mock_response_3
+        ]
+        
+        # Create a tool that returns a huge payload
+        def massive_grep(query):
+            return "MATCH data " * 1000  # ~11,000 chars, well over MAX_TOOL_RESULT_LEN (4000)
+            
+        grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)
+        agent = Agent(name="TestOrchestrator", tools=[grep_tool])
+        
+        result = agent.call("Find bugs related to test")
+        
+        # Assertions
+        self.assertEqual(mock_client.chat.completions.create.call_count, 3)
+        
+        condensation_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        user_msg = next(m for m in condensation_call_kwargs['messages'] if m['role'] == 'user')
+        self.assertIn("I must find this using grep.", user_msg['content'])
+        self.assertIn("MATCH data", user_msg['content'])
+        
+        history = agent.history
+        assistant_msg = next(m for m in history if m['role'] == 'assistant' and "grep_keyword" in m['content'])
+        self.assertNotIn("<think>", assistant_msg['content'])
+        
+        tool_msg = next(m for m in history if m['role'] == 'user' and '[Tool Result]' in m['content'])
+        self.assertIn("Condensed grep output.", tool_msg['content'])
+        self.assertNotIn("MATCH data MATCH data", tool_msg['content'])
+        
+        final_assistant_msg = history[-1]
+        self.assertEqual(final_assistant_msg['reasoning'], "Now I know the answer.")
+        self.assertNotIn("<think>", final_assistant_msg['content'])
+        self.assertEqual(result, "[]")
+
+    @patch('milo.agents.baseagent.OpenAI')
+    def test_native_reasoning_content_extraction(self, mock_openai):
+        """
+        Verifies that native OpenAI 'reasoning_content' is correctly extracted
+        and passed as 'reflective_thinking' to the ToolSummaryAgent when a tool
+        returns a massive payload, without relying on <think> tags.
+        """
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        
+        # 1. Main agent's first response: a tool call + native reasoning
+        tool_call_message = MagicMock()
+        tool_call_message.role = "assistant"
+        tool_call_message.content = ""
+        tool_call_message.reasoning_content = "I must find this using grep natively."
+        
+        mock_tc = MagicMock()
+        mock_tc.id = "call_abc123"
+        mock_tc.type = "function"
+        mock_tc.function.name = "grep_keyword"
+        mock_tc.function.arguments = '{"query": "test"}'
+        tool_call_message.tool_calls = [mock_tc]
+        
+        # 2. ToolSummaryAgent's response: condensed summary (simulated JSON output)
+        condensation_message = MagicMock()
+        condensation_message.role = "assistant"
+        condensation_message.content = '```json\n{"summary": "Condensed grep output."}\n```'
+        condensation_message.reasoning_content = None
+        condensation_message.tool_calls = None
+        
+        # 3. Main agent's final response: final JSON array + native reasoning
+        final_message = MagicMock()
+        final_message.role = "assistant"
+        final_message.content = "```json\n[]\n```"
+        final_message.reasoning_content = "Now I know the answer natively."
+        final_message.tool_calls = None
+        
+        mock_response_1 = MagicMock(choices=[MagicMock(message=tool_call_message)])
+        mock_response_1.usage.total_tokens = 100
+        mock_response_2 = MagicMock(choices=[MagicMock(message=condensation_message)])
+        mock_response_2.usage.total_tokens = 50
+        mock_response_3 = MagicMock(choices=[MagicMock(message=final_message)])
+        mock_response_3.usage.total_tokens = 100
+        
+        mock_client.chat.completions.create.side_effect = [
+            mock_response_1, mock_response_2, mock_response_3
+        ]
+        
+        # Create a tool that returns a huge payload
+        def massive_grep(query):
+            return "MATCH data " * 1000  # ~11,000 chars
+            
+        grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)
+        agent = Agent(name="TestOrchestrator", tools=[grep_tool])
+        
+        result = agent.call("Find bugs related to test")
+        
+        # Assertions
+        self.assertEqual(mock_client.chat.completions.create.call_count, 3)
+        
+        condensation_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        user_msg = next(m for m in condensation_call_kwargs['messages'] if m['role'] == 'user')
+        self.assertIn("I must find this using grep natively.", user_msg['content'])
+        self.assertIn("MATCH data", user_msg['content'])
+        
+        history = agent.history
+        assistant_msg = next(m for m in history if m['role'] == 'assistant' and "grep_keyword" in m['content'])
+        self.assertEqual(assistant_msg['reasoning'], "I must find this using grep natively.")
+        
+        final_assistant_msg = history[-1]
+        self.assertEqual(final_assistant_msg['reasoning'], "Now I know the answer natively.")
+        self.assertEqual(result, "[]")
 
 if __name__ == '__main__':
     unittest.main()

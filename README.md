@@ -7,6 +7,7 @@ The initial goal is to add tools for developers, such as code commenting and cod
 Use OpenAI library for cross-compatibility instead of Ollama native python library.
 
 ## Project Structure
+
 ```
 ├── milo/
 │   ├── agents/
@@ -69,6 +70,7 @@ Use OpenAI library for cross-compatibility instead of Ollama native python libra
 ├── requirements.txt             # Project dependencies
 ├── LICENSE                      # License file
 └── README.md                    # This file
+```
 
 ## Usage:
 3 command line options are provided as executable scripts:
