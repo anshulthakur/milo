@@ -13,7 +13,7 @@ from milo.codereview.models import ToolSummaryInput, ToolSummaryOutput
 
 LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://srsw.cdot.in:11434/v1")
 LLM_MODEL = os.environ.get('LLM_MODEL', "comb")
-MAX_TOOL_RESULT_LEN = int(os.environ.get('LLMMAX_TOOL_RESULT_LEN_MODEL', "4000"))
+MAX_TOOL_RESULT_LEN = int(os.environ.get('LLM_MAX_TOOL_RESULT_LEN_MODEL', "4000"))
 USE_TOOL_SUMMARIZER = os.environ.get('USE_TOOL_SUMMARIZER', "0") in ('TRUE', 'true', 'True', '1')
 
 class ContextProcessor:
