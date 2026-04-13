@@ -47,11 +47,3 @@ class InputCode(BaseModel):
     request: str = ("Please revise the docstring for the provided method. "
                     "Return the result in JSON format using the schema provided. "
                     "Use tools to fetch further context from the repository graph to ensure documentation relevance. ")
-
-class ToolSummaryInput(BaseModel):
-    tool_name: str = Field(..., description="The tool that was called")
-    tool_args: str = Field(..., description="The arguments passed to the tool")
-    raw_output: str = Field(..., description="The raw, unsummarized output of the tool")
-
-class ToolSummaryOutput(BaseModel):
-    extracted_data: str = Field(..., description="The exact, verbatim data segments from the raw_output that are relevant to the thinking. Do not summarize or add commentary.")

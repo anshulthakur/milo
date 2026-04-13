@@ -58,6 +58,7 @@ class RepoGraph:
                 "args": params or "",
                 "calls": [],
                 "defined_in": filename,
+                "summary": "",
             }
 
         if callee:

@@ -1,0 +1,4 @@
+FROM qwen3.5:9b
+
+PARAMETER temperature 0.4
+PARAMETER num_ctx 16000

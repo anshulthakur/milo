@@ -8,7 +8,6 @@ import re
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from milo.agents.tools import Tool
-from milo.codereview.models import ToolSummaryInput, ToolSummaryOutput
 
 
 LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://srsw.cdot.in:11434/v1")
@@ -314,7 +313,7 @@ class Agent:
                     if len(result_str) > 50000:
                         result_str = result_str[:50000] + "\n...[TRUNCATED FOR SUMMARIZER]"
                         
-                    summarizer = ToolSummaryAgent(endpoint="http://192.168.173.74:11434/v1")
+                    summarizer = ToolSummaryAgent(endpoint=LLM_ENDPOINT)
                     condensed = summarizer.summarize(
                         tool_name=tool_name,
                         tool_args=json.dumps(arguments),
@@ -354,6 +353,15 @@ class Agent:
                 print(tb)
 
         return self.call()
+
+
+class ToolSummaryInput(BaseModel):
+    tool_name: str = Field(..., description="The tool that was called")
+    tool_args: str = Field(..., description="The arguments passed to the tool")
+    raw_output: str = Field(..., description="The raw, unsummarized output of the tool")
+
+class ToolSummaryOutput(BaseModel):
+    extracted_data: str = Field(..., description="The exact, verbatim data segments from the raw_output that are relevant to the thinking. Do not summarize or add commentary.")
 
 
 class ToolSummaryAgent(Agent):
