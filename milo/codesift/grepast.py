@@ -1,6 +1,7 @@
 from grep_ast.main import enumerate_files
 from grep_ast.grep_ast import TreeContext
 
+import os
 from pathlib import Path
 import pathspec
 import traceback
@@ -55,6 +56,7 @@ def grep_ast(
     query: str,
     file_hint=None,
     repo_path="",
+    page: int = 1
 ) -> dict | None:
     """
     Recursively searches for a string pattern in files within a repository, respecting .gitignore exclusions.
@@ -112,8 +114,46 @@ def grep_ast(
         for fname in enumerate_files([parent], spec):
             matches = lookup_file(fname, query)
             if matches is not None:
-                results.update({fname: matches})
-        return {"query": query, "results": results}
+                results[fname] = matches
+
+        page_length = int(os.environ.get('GREP_PAGE_LENGTH', '2000'))
+        words_skipped = 0
+        words_included = 0
+        target_skip = (page - 1) * page_length
+        
+        paginated_results = {}
+        has_more = False
+        
+        for fname, matches in results.items():
+            if words_included >= page_length:
+                has_more = True
+                break
+            
+            lines = matches.split('\n')
+            included_lines = []
+            for line in lines:
+                line_words = len(line.split())
+                
+                if words_skipped < target_skip:
+                    if words_skipped + line_words <= target_skip:
+                        words_skipped += line_words
+                        continue
+                    else:
+                        words_included += line_words
+                        words_skipped = target_skip
+                        included_lines.append(line)
+                else:
+                    if words_included + line_words <= page_length or words_included == 0:
+                        words_included += line_words
+                        included_lines.append(line)
+                    else:
+                        has_more = True
+                        break
+                        
+            if included_lines:
+                paginated_results[fname] = '\n'.join(included_lines)
+
+        return {"query": query, "page": page, "has_more_pages": has_more, "results": paginated_results}
     except Exception:
         traceback.print_exc()
         return None

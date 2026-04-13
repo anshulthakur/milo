@@ -66,6 +66,10 @@ class GrepContext(BaseModel):
         description="Optional file path in which search to be done."
         " If not specified, search done on entire codebase",
     )
+    page: Optional[int] = Field(
+        1,
+        description="Page number of the results to fetch. Default is 1."
+    )
 
 
 # ---- Tool Builder ----

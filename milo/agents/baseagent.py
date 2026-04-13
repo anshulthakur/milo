@@ -8,10 +8,13 @@ import re
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from milo.agents.tools import Tool
+from milo.codereview.models import ToolSummaryInput, ToolSummaryOutput
+
 
 LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://srsw.cdot.in:11434/v1")
 LLM_MODEL = os.environ.get('LLM_MODEL', "comb")
 MAX_TOOL_RESULT_LEN = int(os.environ.get('LLMMAX_TOOL_RESULT_LEN_MODEL', "4000"))
+USE_TOOL_SUMMARIZER = os.environ.get('USE_TOOL_SUMMARIZER', "0") in ('TRUE', 'true', 'True', '1')
 
 class ContextProcessor:
     """Base interface for managing context/history passed to the LLM."""
@@ -303,24 +306,23 @@ class Agent:
                 result_str = json.dumps(result) if not isinstance(result, str) else result
                 
                 print(result)
-                # Context Condensation Step
-                print(f"[{self.name}] Condensing tool output ({len(result_str)} chars)...")
-                
-                # Hard limit input to summarizer to prevent crashing the sub-agent
-                if len(result_str) > 50000:
-                    result_str = result_str[:50000] + "\n...[TRUNCATED FOR SUMMARIZER]"
+                if USE_TOOL_SUMMARIZER:
+                    # Context Condensation Step
+                    print(f"[{self.name}] Condensing tool output ({len(result_str)} chars)...")
                     
-                #summarizer = ToolSummaryAgent(endpoint=self.endpoint)
-                summarizer = ToolSummaryAgent(endpoint="http://192.168.173.74:11434/v1")
-                condensed = summarizer.summarize(
-                    tool_name=tool_name,
-                    tool_args=json.dumps(arguments),
-                    raw_output=result_str
-                )
-                result = condensed
-                print(f"[{self.name}] Condensation complete. Reduced to {len(condensed)} chars.")
-                    
+                    # Hard limit input to summarizer to prevent crashing the sub-agent
+                    if len(result_str) > 50000:
+                        result_str = result_str[:50000] + "\n...[TRUNCATED FOR SUMMARIZER]"
                         
+                    summarizer = ToolSummaryAgent(endpoint="http://192.168.173.74:11434/v1")
+                    condensed = summarizer.summarize(
+                        tool_name=tool_name,
+                        tool_args=json.dumps(arguments),
+                        raw_output=result_str
+                    )
+                    result = condensed
+                    print(f"[{self.name}] Condensation complete. Reduced to {len(condensed)} chars.")
+                
                 results.append({"tool": tool_name, "result": result})
 
                 # Add result back to conversation history
@@ -353,13 +355,6 @@ class Agent:
 
         return self.call()
 
-class ToolSummaryInput(BaseModel):
-    tool_name: str = Field(..., description="The tool that was called")
-    tool_args: str = Field(..., description="The arguments passed to the tool")
-    raw_output: str = Field(..., description="The raw, unsummarized output of the tool")
-
-class ToolSummaryOutput(BaseModel):
-    extracted_data: str = Field(..., description="The exact, verbatim data segments from the raw_output that are relevant to the thinking. Do not summarize or add commentary.")
 
 class ToolSummaryAgent(Agent):
     def __init__(self, endpoint=LLM_ENDPOINT):

@@ -1207,5 +1207,50 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         self.assertEqual(final_assistant_msg['reasoning'], "Now I know the answer natively.")
         self.assertEqual(result, "[]")
 
+class TestGrepAstPagination(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = Path('/tmp/grep_pagination_test').resolve()
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+        self.tmp_dir.mkdir(parents=True)
+        self.file_path = self.tmp_dir / "test_grep.py"
+        
+        lines = []
+        for i in range(50):
+            # 10 words per line: 1 (def) + 1 (name) + 1 (#) + 7 (numbers) = 10 words
+            lines.append(f"def search_target_{i}(): # 1 2 3 4 5 6 7")
+        self.file_path.write_text("\n".join(lines), encoding='utf-8')
+
+    def tearDown(self):
+        if self.tmp_dir.exists():
+            shutil.rmtree(self.tmp_dir)
+
+    @patch.dict(os.environ, {"GREP_PAGE_LENGTH": "100"})
+    def test_pagination_limits(self):
+        from milo.codesift.grepast import grep_ast
+        
+        # Page 1
+        res1 = grep_ast(query="search_target", repo_path=str(self.tmp_dir), page=1)
+        self.assertIsNotNone(res1)
+        self.assertTrue(res1["has_more_pages"])
+        self.assertEqual(res1["page"], 1)
+        self.assertTrue(len(res1["results"]) > 0)
+        
+        content1 = list(res1["results"].values())[0]
+        words1 = len(content1.split())
+        self.assertLessEqual(words1, 100)
+        self.assertGreater(words1, 0)
+        
+        # Page 6 (Out of bounds, skipping 500 words)
+        res6 = grep_ast(query="search_target", repo_path=str(self.tmp_dir), page=6)
+        self.assertIsNotNone(res6)
+        self.assertFalse(res6["has_more_pages"])
+        self.assertEqual(res6["page"], 6)
+        if res6["results"]:
+            content6 = list(res6["results"].values())[0]
+            self.assertEqual(len(content6.split()), 0)
+        else:
+            self.assertEqual(len(res6["results"]), 0)
+
 if __name__ == '__main__':
     unittest.main()
