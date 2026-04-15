@@ -93,6 +93,20 @@ class InspectCallFlowArgs(BaseModel):
     entry_function: str = Field(..., description="The fully qualified entry point function name to trace (e.g., 'main.py::main')")
 
 
+class CreateFileArgs(BaseModel):
+    file_path: str = Field(..., description="The path of the new file, relative to the repository root.")
+    content: str = Field(..., description="The complete content of the new file.")
+
+
+class ApplyDiffArgs(BaseModel):
+    file_path: str = Field(..., description="The path of the file to patch, relative to the repository root.")
+    diff: str = Field(..., description="A standard unified diff patch (including --- and +++ headers) to apply to the file. Ensure you provide enough context lines for the patch to apply cleanly.")
+
+class ReplaceSnippetArgs(BaseModel):
+    file_path: str = Field(..., description="The path of the file to modify, relative to the repository root.")
+    search_text: str = Field(..., description="The exact text to be replaced. Must match the file's contents perfectly, including indentation and whitespace. Include enough context to make it unique.")
+    replace_text: str = Field(..., description="The new text that will replace the search_text.")
+
 # ---- Tool Builder ----
 def build_tool(
     name: str, description: str, model: type[BaseModel], func: Callable
