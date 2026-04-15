@@ -97,8 +97,37 @@ def comb_main():
 
 def codesift_main():
     parser = argparse.ArgumentParser(description='Codesift: Terminal-based chat interface.')
-    print("Starting terminal-based chat interface for Codesift...")
-    # Add logic to start the chat interface
+    parser.add_argument('path', nargs='?', default='.', help='Path to the repository.')
+    args = parser.parse_args()
+    
+    target_path = os.path.abspath(args.path)
+    git_root = get_git_root(target_path) or target_path
+    
+    metadata_path = os.path.join(git_root, ".milo", "metadata.json")
+    if not os.path.exists(metadata_path):
+        print(f"Error: Semantic map not found at {metadata_path}.")
+        print("Please run the SemanticIndexer first.")
+        sys.exit(1)
+        
+    from milo.agents.repocomprehension import get_repocomprehension_agent
+    agent = get_repocomprehension_agent(repo_path=git_root, metadata_path=metadata_path)
+    
+    print(f"\n[Codesift Navigator initialized for: {git_root}]")
+    print("Type 'exit' or 'quit' to stop.\n")
+    
+    while True:
+        try:
+            user_input = input("You> ")
+            if user_input.strip().lower() in ['exit', 'quit']:
+                break
+            if not user_input.strip():
+                continue
+                
+            response = agent.call(user_input)
+        except (KeyboardInterrupt, EOFError):
+            break
+        except Exception as e:
+            print(f"\nError: {e}\n")
 
 
 def main():

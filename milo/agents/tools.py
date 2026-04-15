@@ -72,6 +72,27 @@ class GrepContext(BaseModel):
     )
 
 
+class ListDirectoryArgs(BaseModel):
+    target_path: Optional[str] = Field(".", description="The directory path to list, relative to the repository root.")
+
+
+class TreeDirectoryArgs(BaseModel):
+    target_path: Optional[str] = Field(".", description="The directory path to tree, relative to the repository root.")
+    depth: Optional[int] = Field(2, description="The maximum depth to traverse.")
+
+
+class ViewArchitectureArgs(BaseModel):
+    pass
+
+
+class InspectModuleArgs(BaseModel):
+    module_name: str = Field(..., description="The file path or module name to inspect (e.g., 'src/main.py')")
+
+
+class InspectCallFlowArgs(BaseModel):
+    entry_function: str = Field(..., description="The fully qualified entry point function name to trace (e.g., 'main.py::main')")
+
+
 # ---- Tool Builder ----
 def build_tool(
     name: str, description: str, model: type[BaseModel], func: Callable
