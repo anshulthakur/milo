@@ -69,22 +69,28 @@ class CompactContextProcessor(DefaultContextProcessor):
             
             super().add_message({
                 "role": "assistant",
-                "content": compressed_content
+                "content": compressed_content,
+                "reasoning": message.get("reasoning", "")
             })
-            
         elif role == "tool":
-            # Compress the tool execution result into a simple user message
+            # Compress the tool execution result into a simple tool message
             name = message.get("name", "unknown")
             content = message.get("content", "")
             
             # Strict Truncation Safety Net (~4000 chars is roughly 1000 tokens)
             if len(content) > MAX_TOOL_RESULT_LEN:
                 content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large. Please refine your query or use more specific tool arguments]..."
-            super().add_message({
-                "role": "user",
-                "content": f"[Tool Result] Name: {name}\n{content}"
-            })
             
+            tool_msg = {
+                "role": "tool",
+                "content": f"[Tool Result] Name: {name}\n{content}"
+            }
+            if "tool_call_id" in message:
+                tool_msg["tool_call_id"] = message["tool_call_id"]
+            if "name" in message:
+                tool_msg["name"] = message["name"]
+                
+            super().add_message(tool_msg)
         else:
             super().add_message(message)
 
@@ -277,9 +283,36 @@ class Agent:
         If no tool calls, it cleans and returns the content.
         """
         tool_calls = message.get("tool_calls")
+        content = message.get("content", "")
+
+        # Handle case where model hallucinates a tool call in the content field
+        if not tool_calls and content and content.strip().startswith("[Tool Call]"):
+            print("Hallucinated tool call detected in content. Attempting to parse.")
+            parsed_calls = []
+            for line in content.strip().split('\n'):
+                # Pattern: [Tool Call] Name: <name> | Args: <json>
+                match = re.match(r"\[Tool Call\] Name: ([\w_]+) \| Args: (.*)", line.strip())
+                if match:
+                    tool_name = match.group(1)
+                    args_str = match.group(2)
+                    try:
+                        call_id = f"hallucinated-call-{os.urandom(4).hex()}"
+                        parsed_calls.append({
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": args_str
+                            }
+                        })
+                    except Exception as e:
+                        print(f"Failed to create structure for hallucinated tool call: {e}")
+                        continue
+            if parsed_calls:
+                tool_calls = parsed_calls
+
         if not tool_calls:
             print("No tool calls")
-            content = message.get("content", "")
             if content:
                 # Models sometimes wrap JSON in markdown, so we strip it.
                 match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", content)
@@ -317,7 +350,8 @@ class Agent:
                     condensed = summarizer.summarize(
                         tool_name=tool_name,
                         tool_args=json.dumps(arguments),
-                        raw_output=result_str
+                        raw_output=result_str,
+                        reflective_thinking=reflective_thinking
                     )
                     result = condensed
                     print(f"[{self.name}] Condensation complete. Reduced to {len(condensed)} chars.")
@@ -359,6 +393,7 @@ class ToolSummaryInput(BaseModel):
     tool_name: str = Field(..., description="The tool that was called")
     tool_args: str = Field(..., description="The arguments passed to the tool")
     raw_output: str = Field(..., description="The raw, unsummarized output of the tool")
+    reflective_thinking: Optional[str] = Field(None, description="The reasoning or 'thinking' process of the parent agent that led to this tool call.")
 
 class ToolSummaryOutput(BaseModel):
     extracted_data: str = Field(..., description="The exact, verbatim data segments from the raw_output that are relevant to the thinking. Do not summarize or add commentary.")
@@ -374,8 +409,8 @@ class ToolSummaryAgent(Agent):
             endpoint=endpoint,
             system_prompt=(
                 "You are a strictly factual data extraction assistant.\n"
-                "You will receive a JSON payload containing the 'tool_name', 'tool_args', and the 'raw_output'.\n"
-                "Your task is to read the 'raw_output' and extract the exact, verbatim data segments that are relevant to the 'tool_name' and 'tool_args'.\n"
+                "You will receive a JSON payload containing the 'tool_name', 'tool_args', 'raw_output', and optionally the parent agent's 'reflective_thinking'.\n"
+                "Your task is to read the 'raw_output' and extract the exact, verbatim data segments that are relevant to the 'reflective_thinking'. If no thinking is provided, extract the most salient parts of the output.\n"
                 "CRITICAL RULES:\n"
                 "1. You are NOT a code reviewer. DO NOT evaluate bugs, correctness, or propose solutions.\n"
                 "2. DO NOT summarize or draw conclusions. Copy the relevant parts of the 'raw_output' verbatim.\n"
@@ -383,11 +418,12 @@ class ToolSummaryAgent(Agent):
             )
         )
 
-    def summarize(self, tool_name: str, tool_args: str, raw_output: str) -> str:
+    def summarize(self, tool_name: str, tool_args: str, raw_output: str, reflective_thinking: Optional[str] = None) -> str:
         input_data = ToolSummaryInput(
             tool_name=tool_name,
             tool_args=tool_args,
-            raw_output=raw_output
+            raw_output=raw_output,
+            reflective_thinking=reflective_thinking
         )
 
         prompt = input_data.model_dump_json(indent=2)

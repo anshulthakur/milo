@@ -1070,7 +1070,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         tool_call_message = MagicMock()
         tool_call_message.role = "assistant"
         tool_call_message.content = "<think>\nI must find this using grep.\n</think>"
-        tool_call_message.reasoning_content = None
+        tool_call_message.reasoning = None
         
         mock_tc = MagicMock()
         mock_tc.id = "call_abc123"
@@ -1082,15 +1082,15 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         # 2. ToolSummaryAgent's response: condensed summary (simulated JSON output)
         condensation_message = MagicMock()
         condensation_message.role = "assistant"
-        condensation_message.content = '```json\n{"summary": "Condensed grep output."}\n```'
-        condensation_message.reasoning_content = None
+        condensation_message.content = '```json\n{"extracted_data": "Condensed grep output."}\n```'
+        condensation_message.reasoning = None
         condensation_message.tool_calls = None
         
         # 3. Main agent's final response: final JSON array + thinking
         final_message = MagicMock()
         final_message.role = "assistant"
         final_message.content = "<think>\nNow I know the answer.\n</think>\n```json\n[]\n```"
-        final_message.reasoning_content = None
+        final_message.reasoning = None
         final_message.tool_calls = None
         
         mock_response_1 = MagicMock(choices=[MagicMock(message=tool_call_message)])
@@ -1111,12 +1111,14 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)
         agent = Agent(name="TestOrchestrator", tools=[grep_tool])
         
-        result = agent.call("Find bugs related to test")
-        
+        with patch('milo.agents.baseagent.USE_TOOL_SUMMARIZER', True):
+            result = agent.call("Find bugs related to test")
+
         # Assertions
         self.assertEqual(mock_client.chat.completions.create.call_count, 3)
         
         condensation_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        print(condensation_call_kwargs)
         user_msg = next(m for m in condensation_call_kwargs['messages'] if m['role'] == 'user')
         self.assertIn("I must find this using grep.", user_msg['content'])
         self.assertIn("MATCH data", user_msg['content'])
@@ -1125,7 +1127,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         assistant_msg = next(m for m in history if m['role'] == 'assistant' and "grep_keyword" in m['content'])
         self.assertNotIn("<think>", assistant_msg['content'])
         
-        tool_msg = next(m for m in history if m['role'] == 'user' and '[Tool Result]' in m['content'])
+        tool_msg = next(m for m in history if m['role'] == 'tool' and '[Tool Result]' in m['content'])
         self.assertIn("Condensed grep output.", tool_msg['content'])
         self.assertNotIn("MATCH data MATCH data", tool_msg['content'])
         
@@ -1137,9 +1139,9 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
     @patch('milo.agents.baseagent.OpenAI')
     def test_native_reasoning_content_extraction(self, mock_openai):
         """
-        Verifies that native OpenAI 'reasoning_content' is correctly extracted
+        Verifies that the native 'reasoning' attribute is correctly extracted
         and passed as 'reflective_thinking' to the ToolSummaryAgent when a tool
-        returns a massive payload, without relying on <think> tags.
+        returns a massive payload.
         """
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -1148,7 +1150,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         tool_call_message = MagicMock()
         tool_call_message.role = "assistant"
         tool_call_message.content = ""
-        tool_call_message.reasoning_content = "I must find this using grep natively."
+        tool_call_message.reasoning = "I must find this using grep natively."
         
         mock_tc = MagicMock()
         mock_tc.id = "call_abc123"
@@ -1160,15 +1162,15 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         # 2. ToolSummaryAgent's response: condensed summary (simulated JSON output)
         condensation_message = MagicMock()
         condensation_message.role = "assistant"
-        condensation_message.content = '```json\n{"summary": "Condensed grep output."}\n```'
-        condensation_message.reasoning_content = None
+        condensation_message.content = '```json\n{"extracted_data": "Condensed grep output."}\n```'
+        condensation_message.reasoning = None
         condensation_message.tool_calls = None
         
         # 3. Main agent's final response: final JSON array + native reasoning
         final_message = MagicMock()
         final_message.role = "assistant"
         final_message.content = "```json\n[]\n```"
-        final_message.reasoning_content = "Now I know the answer natively."
+        final_message.reasoning = "Now I know the answer natively."
         final_message.tool_calls = None
         
         mock_response_1 = MagicMock(choices=[MagicMock(message=tool_call_message)])
@@ -1189,23 +1191,72 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)
         agent = Agent(name="TestOrchestrator", tools=[grep_tool])
         
-        result = agent.call("Find bugs related to test")
-        
+        with patch('milo.agents.baseagent.USE_TOOL_SUMMARIZER', True):
+            result = agent.call("Find bugs related to test")
+
         # Assertions
         self.assertEqual(mock_client.chat.completions.create.call_count, 3)
         
         condensation_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+
         user_msg = next(m for m in condensation_call_kwargs['messages'] if m['role'] == 'user')
         self.assertIn("I must find this using grep natively.", user_msg['content'])
         self.assertIn("MATCH data", user_msg['content'])
         
         history = agent.history
+
         assistant_msg = next(m for m in history if m['role'] == 'assistant' and "grep_keyword" in m['content'])
+
         self.assertEqual(assistant_msg['reasoning'], "I must find this using grep natively.")
         
         final_assistant_msg = history[-1]
         self.assertEqual(final_assistant_msg['reasoning'], "Now I know the answer natively.")
         self.assertEqual(result, "[]")
+
+    @patch('milo.agents.baseagent.OpenAI')
+    def test_hallucinated_tool_call_parsing(self, mock_openai):
+        """
+        Verifies that hallucinated tool calls in the content field are correctly parsed
+        and executed by the agent, acting as an automatic fallback mechanism.
+        """
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        
+        # 1. Main agent's first response: hallucinated tool call in content
+        hallucinated_message = MagicMock()
+        hallucinated_message.role = "assistant"
+        hallucinated_message.content = '[Tool Call] Name: grep_keyword | Args: {"query": "test"}'
+        hallucinated_message.reasoning = "Thinking about using grep."
+        hallucinated_message.tool_calls = None
+        
+        # 2. ToolSummaryAgent's response: condensed summary
+        condensation_message = MagicMock()
+        condensation_message.role = "assistant"
+        condensation_message.content = '```json\n{"extracted_data": "Condensed grep output."}\n```'
+        condensation_message.reasoning = None
+        condensation_message.tool_calls = None
+        
+        # 3. Main agent's final response: final JSON array
+        final_message = MagicMock()
+        final_message.role = "assistant"
+        final_message.content = "```json\n[]\n```"
+        final_message.reasoning = "Now I know the answer."
+        final_message.tool_calls = None
+        
+        mock_client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=hallucinated_message)]),
+            MagicMock(choices=[MagicMock(message=condensation_message)]),
+            MagicMock(choices=[MagicMock(message=final_message)])
+        ]
+        
+        grep_tool = Tool(name="grep_keyword", description="Search", func=lambda query: "MATCH data " * 1000, schema=MockGrepArgs)
+        agent = Agent(name="TestOrchestrator", tools=[grep_tool])
+        
+        with patch('milo.agents.baseagent.USE_TOOL_SUMMARIZER', True):
+            result = agent.call("Find bugs")
+            
+        tool_msg = next(m for m in agent.history if m['role'] == 'tool' and '[Tool Result]' in m['content'])
+        self.assertIn("Condensed grep output.", tool_msg['content'])
 
 class TestGrepAstPagination(unittest.TestCase):
     def setUp(self):

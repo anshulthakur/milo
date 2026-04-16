@@ -25,6 +25,7 @@ class TestFunctionSummarizerAgent(unittest.TestCase):
         # Setup mock response
         mock_message = MagicMock()
         mock_message.content = '```json\n{"summary": "This is a factual test summary."}\n```'
+        mock_message.tool_calls = None
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=mock_message)]
         mock_client.chat.completions.create.return_value = mock_response
@@ -68,6 +69,7 @@ class TestModuleSummarizerAgent(unittest.TestCase):
         
         mock_message = MagicMock()
         mock_message.content = '```json\n{"summary": "This module does XYZ."}\n```'
+        mock_message.tool_calls = None
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=mock_message)]
         mock_client.chat.completions.create.return_value = mock_response
@@ -94,6 +96,7 @@ class TestArchitectureSummarizerAgent(unittest.TestCase):
         
         mock_message = MagicMock()
         mock_message.content = '```json\n{"summary": "This flow starts at main and calculates totals."}\n```'
+        mock_message.tool_calls = None
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=mock_message)]
         mock_client.chat.completions.create.return_value = mock_response
