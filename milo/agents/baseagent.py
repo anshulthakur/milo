@@ -245,7 +245,8 @@ class Agent:
             if self.system_prompt:
                 self.system_prompt = f"{self.system_prompt}\n{prompt_addition}"
             else:
-                self.system_prompt = prompt_addition
+                pass
+                #self.system_prompt = prompt_addition
                 
         self.model = model
         self.client = OpenAI(base_url=self.endpoint, api_key="ollama") # api_key is required but not used for local Ollama
