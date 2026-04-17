@@ -55,6 +55,7 @@ class DefaultContextProcessor(ContextProcessor):
         for msg in self._history:
             msg_copy = msg.copy()
             msg_copy.pop("reasoning", None)
+            msg_copy.pop("reflective_thinking", None)
             messages.append(msg_copy)
         return messages
 
