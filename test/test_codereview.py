@@ -1111,10 +1111,10 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         self.assertEqual(mock_client.chat.completions.create.call_count, 2)
         
         history = agent.history
-        assistant_msg = next(m for m in history if m['role'] == 'assistant' and "grep_keyword" in m['content'])
+        assistant_msg = next(m for m in history if m['role'] == 'assistant' and m.get('tool_calls') and m['tool_calls'][0]['function']['name'] == 'grep_keyword')
         self.assertNotIn("<think>", assistant_msg['content'])
         
-        tool_msg = next(m for m in history if m['role'] == 'tool' and '[Tool Result]' in m['content'])
+        tool_msg = next(m for m in history if m['role'] == 'tool')
         self.assertIn("Condensed grep output.", tool_msg['content'])
         self.assertNotIn("MATCH data MATCH data", tool_msg['content'])
         
@@ -1179,7 +1179,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         
         history = agent.history
 
-        assistant_msg = next(m for m in history if m['role'] == 'assistant' and "grep_keyword" in m['content'])
+        assistant_msg = next(m for m in history if m['role'] == 'assistant' and m.get('tool_calls') and m['tool_calls'][0]['function']['name'] == 'grep_keyword')
 
         self.assertEqual(assistant_msg['reasoning'], "I must find this using grep natively.")
         
@@ -1223,7 +1223,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         
         result = agent.call("Find bugs")
             
-        tool_msg = next(m for m in agent.history if m['role'] == 'tool' and '[Tool Result]' in m['content'])
+        tool_msg = next(m for m in agent.history if m['role'] == 'tool')
         self.assertIn("Condensed grep output.", tool_msg['content'])
 
 class TestGrepAstPagination(unittest.TestCase):

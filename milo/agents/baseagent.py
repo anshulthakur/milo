@@ -122,25 +122,7 @@ class CompactContextProcessor(DefaultContextProcessor):
     def add_message(self, message: Dict[str, Any]):
         role = message.get("role")
         
-        if role == "assistant" and message.get("tool_calls"):
-            # Compress the tool calls request into a simple assistant text action
-            calls = []
-            for tc in message["tool_calls"]:
-                name = tc.get("function", {}).get("name", "unknown")
-                args = tc.get("function", {}).get("arguments", "{}")
-                calls.append(f"[Tool Call] Name: {name} | Args: {args}")
-            
-            content = message.get("content") or ""
-            compressed_content = (content + "\n" + "\n".join(calls)).strip()
-            
-            super().add_message({
-                "role": "assistant",
-                "content": compressed_content,
-                "reasoning": message.get("reasoning", "")
-            })
-        elif role == "tool":
-            # Compress the tool execution result into a simple tool message
-            name = message.get("name", "unknown")
+        if role == "tool":
             content = message.get("content", "")
             
             # Use claw-compactor if available and content is large
@@ -156,14 +138,8 @@ class CompactContextProcessor(DefaultContextProcessor):
             elif len(content) > MAX_TOOL_RESULT_LEN:
                 content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large. Please refine your query or use more specific tool arguments]..."
             
-            tool_msg = {
-                "role": "tool",
-                "content": f"[Tool Result] Name: {name}\n{content}"
-            }
-            if "tool_call_id" in message:
-                tool_msg["tool_call_id"] = message["tool_call_id"]
-            if "name" in message:
-                tool_msg["name"] = message["name"]
+            tool_msg = message.copy()
+            tool_msg["content"] = content
                 
             super().add_message(tool_msg)
         else:
