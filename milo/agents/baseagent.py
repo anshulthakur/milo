@@ -110,6 +110,7 @@ class DefaultContextProcessor(ContextProcessor):
             msg_copy = msg.copy()
             msg_copy.pop("reasoning", None)
             msg_copy.pop("reflective_thinking", None)
+            msg_copy.pop("tool_args", None)
             messages.append(msg_copy)
         return messages
 
@@ -442,8 +443,53 @@ class Agent:
                 # Models sometimes wrap JSON in markdown, so we strip it.
                 match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", content)
                 if match:
-                    return match.group(2).strip()
-            return content.strip()
+                    content = match.group(2).strip()
+                else:
+                    content = content.strip()
+                    
+            if self.format and content:
+                try:
+                    json.loads(content)
+                except json.JSONDecodeError:
+                    print(f"[{self.name}] Output is not valid JSON. Cycling back for formatting.")
+                    fix_messages = []
+                    if self.system_prompt:
+                        fix_messages.append({"role": "system", "content": self.system_prompt})
+                    else:
+                        fix_messages.append({"role": "system", "content": "You are a helpful assistant. Your only task is to format the provided text into the required JSON schema."})
+                        
+                    fix_messages.append({
+                        "role": "user", 
+                        "content": f"Please extract the relevant information from the following text and format it strictly according to the required JSON schema. Do not add any extra commentary:\n\n{content}"
+                    })
+                    
+                    try:
+                        chat_kwargs = {
+                            "model": self.model,
+                            "messages": fix_messages,
+                            "stream": False,
+                            "response_format": {"type": "json_schema", "json_schema": self.format}
+                        }
+                        
+                        supported_options = ["temperature", "top_p", "seed"]
+                        for option in supported_options:
+                            if option in self.options:
+                                chat_kwargs[option] = self.options[option]
+                                
+                        fix_response = self.client.chat.completions.create(**chat_kwargs)
+                        fixed_content = fix_response.choices[0].message.content or ""
+                        
+                        match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", fixed_content)
+                        if match:
+                            fixed_content = match.group(2).strip()
+                        else:
+                            fixed_content = fixed_content.strip()
+                            
+                        return fixed_content
+                    except Exception as e:
+                        print(f"[{self.name}] Failed to fix formatting: {e}")
+                        
+            return content
                 
         current_signature = [(tc.get("function", {}).get("name"), tc.get("function", {}).get("arguments")) for tc in tool_calls]
         if getattr(self, '_last_tool_calls', None) == current_signature:
@@ -467,13 +513,11 @@ class Agent:
                 
                 if self._tool_loop_count >= 2:
                     print(f"[{self.name}] Tool loop detected for {tool_name}. Sending loop break message.")
-                    error_msg = "ERROR: Repeated identical tool call detected. You are in an infinite loop. Stop calling this tool with these arguments. Try a different approach or provide a final answer."
+                    error_msg = "ERROR: Repeated identical tool call detected. You are in an infinite loop. Stop calling this tool with these arguments. Provide a final answer based on your current assessment."
                     results.append({"tool": tool_name, "result": error_msg})
                     self.context_processor.add_message(
                         {
-                            "role": "tool",
-                            "tool_call_id": call.get("id"),
-                            "name": tool_name,
+                            "role": "user",
                             "content": error_msg,
                         }
                     )
