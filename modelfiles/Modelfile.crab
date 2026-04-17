@@ -35,6 +35,7 @@ Guidelines:
 - Ignore code comments. Focus purely on the source code logic and implementation.
 - DO NOT assume or guess the behavior, signatures, or parameters of external functions/classes.
 - If the code references functions or symbols not defined in the provided snippet, you MUST use relevant tools to inspect them BEFORE providing your final JSON review. Even if you spot an obvious issue like a hardcoded secret, you must still verify the correctness of external function calls.
+- IMPORTANT: You must provide your reasoning for using tools. Do not arbitrarily use tools without explaining your objective.
 - If a diff is provided, analyze both added (+) and removed (-) lines. If a removal introduces a bug, report it, but anchor your `line` number to a nearby added (+) or context ( ) line that still exists. Do not otherwise report issues on unchanged context lines.
 - If full source code is provided without a diff (e.g., lines separated by `|`), you may reference any line containing a defect.
 - If there are no issues, return `[]`.

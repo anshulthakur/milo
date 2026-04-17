@@ -239,6 +239,14 @@ class Agent:
         self.endpoint = endpoint
         self.system_prompt = system_prompt
         self.tools: Dict[str, Tool] = {t.name: t for t in tools}
+        
+        if self.tools:
+            prompt_addition = "IMPORTANT: You must provide your reasoning for using tools. Do not arbitrarily use tools without explaining your objective."
+            if self.system_prompt:
+                self.system_prompt = f"{self.system_prompt}\n{prompt_addition}"
+            else:
+                self.system_prompt = prompt_addition
+                
         self.model = model
         self.client = OpenAI(base_url=self.endpoint, api_key="ollama") # api_key is required but not used for local Ollama
         self.options = options
@@ -327,7 +335,7 @@ class Agent:
             return sum(len(str(m)) // 4 for m in msgs)
 
         current_tokens = estimate_tokens(messages)
-        if current_tokens > self.context_size * 0.8:
+        if current_tokens > self.context_size * 0.75:
             print(f"[{self.name}] Context size ({current_tokens}) critically close to limit ({self.context_size}). Applying redaction.")
             first_user_idx = -1
             last_user_idx = -1
@@ -541,6 +549,15 @@ class Agent:
             self.context_processor.prune_old_tool_calls(tool_calls)
 
         reflective_thinking = message.get("reasoning") or message.get("content", "").strip()
+
+        if not reflective_thinking:
+            print(f"[{self.name}] Unreasoned tool call detected. Sending reprimand.")
+            error_msg = "ERROR: You must provide your reasoning before calling tools. Do not arbitrarily use tools without explaining why. Please focus on the objective and state your reasoning."
+            self.context_processor.add_message({
+                "role": "user",
+                "content": error_msg,
+            })
+            return self.call()
 
         results = []
         for call in tool_calls:
