@@ -327,7 +327,7 @@ class Agent:
             return sum(len(str(m)) // 4 for m in msgs)
 
         current_tokens = estimate_tokens(messages)
-        if current_tokens > self.context_size * 0.9:
+        if current_tokens > self.context_size * 0.8:
             print(f"[{self.name}] Context size ({current_tokens}) critically close to limit ({self.context_size}). Applying redaction.")
             first_user_idx = -1
             last_user_idx = -1
