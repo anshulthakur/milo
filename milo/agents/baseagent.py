@@ -47,6 +47,60 @@ class DefaultContextProcessor(ContextProcessor):
     def add_message(self, message: Dict[str, Any]):
         self._history.append(message)
 
+    def prune_old_tool_calls(self, current_tool_calls: List[Dict[str, Any]]):
+        """Removes older duplicate tool calls and their results from history."""
+        ids_to_remove = set()
+        for current_tc in current_tool_calls:
+            c_func = current_tc.get("function", {})
+            c_name = c_func.get("name")
+            c_args_str = c_func.get("arguments", "{}")
+            c_id = current_tc.get("id")
+            
+            try:
+                c_args = json.loads(c_args_str)
+            except Exception:
+                c_args = c_args_str
+            
+            for msg in self._history:
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    for tc in msg["tool_calls"]:
+                        if tc.get("id") == c_id:
+                            continue
+                        t_func = tc.get("function", {})
+                        if t_func.get("name") == c_name:
+                            t_args_str = t_func.get("arguments", "{}")
+                            try:
+                                t_args = json.loads(t_args_str)
+                                is_match = (t_args == c_args)
+                            except Exception:
+                                is_match = (t_args_str == c_args_str)
+                            
+                            if is_match:
+                                ids_to_remove.add(tc.get("id"))
+        
+        if not ids_to_remove:
+            return
+
+        print(f"Pruning {len(ids_to_remove)} duplicate tool calls from history to save context.")
+        new_history = []
+        for msg in self._history:
+            if msg.get("role") == "tool" and msg.get("tool_call_id") in ids_to_remove:
+                continue
+            
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                filtered_tcs = [tc for tc in msg["tool_calls"] if tc.get("id") not in ids_to_remove]
+                
+                if not filtered_tcs and not msg.get("content") and not msg.get("reasoning"):
+                    continue
+                    
+                msg_copy = msg.copy()
+                msg_copy["tool_calls"] = filtered_tcs if filtered_tcs else None
+                new_history.append(msg_copy)
+            else:
+                new_history.append(msg)
+                
+        self._history = new_history
+
     def get_messages(self, include_reasoning: bool = False) -> List[Dict[str, Any]]:
         if include_reasoning:
             return self._history
@@ -126,7 +180,7 @@ class CompactContextProcessor(DefaultContextProcessor):
             content = message.get("content", "")
             
             # Use claw-compactor if available and content is large
-            if self.engine and len(content) > MAX_TOOL_RESULT_LEN:
+            if self.engine:
                 print(f"CompactContextProcessor: Compressing tool output ({len(content)} chars) with FusionEngine...")
                 try:
                     result = self.engine.compress(content, content_type="text")
@@ -192,6 +246,8 @@ class Agent:
         self.context_size = context_size
         self.total_tokens_consumed = 0
         self.current_context_size = 0
+        self._last_tool_calls = None
+        self._tool_loop_count = 0
 
         if self.system_prompt:
             self.context_processor.add_message({"role": "system", "content": self.system_prompt})
@@ -232,6 +288,8 @@ class Agent:
         """
         self.context_processor.clear()
         self.current_context_size = 0
+        self._last_tool_calls = None
+        self._tool_loop_count = 0
         if self.system_prompt:
             self.context_processor.add_message({"role": "system", "content": self.system_prompt})
 
@@ -387,6 +445,16 @@ class Agent:
                     return match.group(2).strip()
             return content.strip()
                 
+        current_signature = [(tc.get("function", {}).get("name"), tc.get("function", {}).get("arguments")) for tc in tool_calls]
+        if getattr(self, '_last_tool_calls', None) == current_signature:
+            self._tool_loop_count = getattr(self, '_tool_loop_count', 0) + 1
+        else:
+            self._last_tool_calls = current_signature
+            self._tool_loop_count = 0
+
+        if hasattr(self.context_processor, "prune_old_tool_calls"):
+            self.context_processor.prune_old_tool_calls(tool_calls)
+
         reflective_thinking = message.get("reasoning") or message.get("content", "").strip()
 
         results = []
@@ -394,7 +462,23 @@ class Agent:
             try:
                 tool_name = call["function"]["name"]
                 # Arguments are a JSON string in the OpenAI response
-                arguments = json.loads(call["function"].get("arguments", "{}"))
+                arguments_str = call["function"].get("arguments", "{}")
+                arguments = json.loads(arguments_str)
+                
+                if self._tool_loop_count >= 2:
+                    print(f"[{self.name}] Tool loop detected for {tool_name}. Sending loop break message.")
+                    error_msg = "ERROR: Repeated identical tool call detected. You are in an infinite loop. Stop calling this tool with these arguments. Try a different approach or provide a final answer."
+                    results.append({"tool": tool_name, "result": error_msg})
+                    self.context_processor.add_message(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id"),
+                            "name": tool_name,
+                            "content": error_msg,
+                        }
+                    )
+                    continue
+
                 tool = self.tools[tool_name]
                 
                 # Validate and parse arguments via Pydantic
