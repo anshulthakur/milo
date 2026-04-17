@@ -92,7 +92,6 @@ class CompactContextProcessor(DefaultContextProcessor):
         if not self.engine or not self.tokenizer:
             return
 
-        print("compress_if_needed")
         # Estimate token usage by summing tokens of content for each message
         current_tokens = sum(self._num_tokens(str(msg.get("content", ""))) for msg in self._history)
         
@@ -131,6 +130,7 @@ class CompactContextProcessor(DefaultContextProcessor):
                 try:
                     result = self.engine.compress(content, content_type="text")
                     content = result.get("compressed", content)
+                    print(f"Compression results: {result.get('stats')}")
                 except Exception as e:
                     print(f"FusionEngine compression failed: {e}")
                     content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large]..."
@@ -256,7 +256,7 @@ class Agent:
         if hasattr(self.context_processor, 'compress_if_needed'):
             self.context_processor.compress_if_needed(self.context_size)
 
-        print(self.history)
+        #print(self.history)
         
         messages = self.context_processor.get_messages(include_reasoning=False)
 
@@ -290,6 +290,7 @@ class Agent:
             if option in self.options:
                 chat_kwargs[option] = self.options[option]
 
+        print(messages)
         response = self.client.chat.completions.create(**chat_kwargs)
         
         # Track token usage if provided by the API
