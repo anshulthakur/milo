@@ -186,7 +186,7 @@ class CompactContextProcessor(DefaultContextProcessor):
                 try:
                     result = self.engine.compress(content, content_type="text")
                     content = result.get("compressed", content)
-                    print(f"Compression results: {result.get('stats')}")
+                    #print(f"Compression results: {result.get('stats')}")
                 except Exception as e:
                     print(f"FusionEngine compression failed: {e}")
                     content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large]..."
@@ -319,6 +319,45 @@ class Agent:
         #print(self.history)
         
         messages = self.context_processor.get_messages(include_reasoning=False)
+
+        # Context Limit Redaction Check
+        def estimate_tokens(msgs):
+            if hasattr(self.context_processor, '_num_tokens'):
+                return sum(self.context_processor._num_tokens(str(m.get("content", "")) + str(m.get("tool_calls", ""))) for m in msgs)
+            return sum(len(str(m)) // 4 for m in msgs)
+
+        current_tokens = estimate_tokens(messages)
+        if current_tokens > self.context_size * 0.9:
+            print(f"[{self.name}] Context size ({current_tokens}) critically close to limit ({self.context_size}). Applying redaction.")
+            first_user_idx = -1
+            last_user_idx = -1
+            for i, m in enumerate(messages):
+                if m.get('role') == 'user':
+                    if first_user_idx == -1:
+                        first_user_idx = i
+                    last_user_idx = i
+            
+            if first_user_idx != -1 and last_user_idx > first_user_idx:
+                redacted_messages = messages[:first_user_idx + 1]
+                redacted_messages.append({
+                    "role": "user",
+                    "content": "[SYSTEM NOTIFICATION: Intermediate tool calls and results have been redacted to preserve context boundary.]"
+                })
+                redacted_messages.extend(messages[last_user_idx:])
+                messages = redacted_messages
+            elif first_user_idx != -1 and len(messages) - first_user_idx > 5:
+                # Find a safe starting point for the tail (an assistant message to prevent dangling tool results)
+                tail_start_idx = len(messages) - 4
+                while tail_start_idx > first_user_idx and messages[tail_start_idx].get('role') == 'tool':
+                    tail_start_idx -= 1
+                
+                redacted_messages = messages[:first_user_idx + 1]
+                redacted_messages.append({
+                    "role": "user",
+                    "content": "[SYSTEM NOTIFICATION: Intermediate tool calls and results have been redacted to preserve context boundary.]"
+                })
+                redacted_messages.extend(messages[tail_start_idx:])
+                messages = redacted_messages
 
         tools = [
             {
