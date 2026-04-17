@@ -4,16 +4,29 @@ import traceback
 from typing import List, Dict, Any, Optional
 import re
 
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
+
 # from ollama import Client
 from pydantic import BaseModel, Field
 from openai import OpenAI
-from milo.agents.tools import Tool
+from milo.agents.tools import Tool, RewindArgs
 
 
 LLM_ENDPOINT = os.environ.get('LLM_ENDPOINT', "http://srsw.cdot.in:11434/v1")
 LLM_MODEL = os.environ.get('LLM_MODEL', "comb")
 MAX_TOOL_RESULT_LEN = int(os.environ.get('LLM_MAX_TOOL_RESULT_LEN_MODEL', "4000"))
 USE_TOOL_SUMMARIZER = os.environ.get('USE_TOOL_SUMMARIZER', "0") in ('TRUE', 'true', 'True', '1')
+
+try:
+    from claw_compactor import FusionEngine
+except ImportError:
+    try:
+        from claw_compactor.fusion.engine import FusionEngine
+    except ImportError:
+        FusionEngine = None
 
 class ContextProcessor:
     """Base interface for managing context/history passed to the LLM."""
@@ -53,6 +66,59 @@ class CompactContextProcessor(DefaultContextProcessor):
     Optimizes token usage by converting verbose OpenAI tool call schemas 
     and tool responses into compact, plain-text conversation turns.
     """
+    def __init__(self):
+        super().__init__()
+        if FusionEngine:
+            self.engine = FusionEngine(enable_rewind=True)
+        else:
+            self.engine = None
+        
+        self.tokenizer = None
+        if tiktoken:
+            try:
+                # Using cl100k_base as a general-purpose tokenizer for modern models.
+                self.tokenizer = tiktoken.get_encoding("cl100k_base")
+            except Exception as e:
+                print(f"Warning: Failed to load tiktoken tokenizer: {e}")
+        else:
+            print("Warning: tiktoken is not installed. Context size management will be disabled.")
+
+    def _num_tokens(self, text: str) -> int:
+        if not self.tokenizer or not text:
+            return 0
+        return len(self.tokenizer.encode(text))
+
+    def compress_if_needed(self, context_size_limit: int):
+        if not self.engine or not self.tokenizer:
+            return
+
+        print("compress_if_needed")
+        # Estimate token usage by summing tokens of content for each message
+        current_tokens = sum(self._num_tokens(str(msg.get("content", ""))) for msg in self._history)
+        
+        # Trigger compression at 80% capacity
+        if current_tokens > context_size_limit * 0.8:
+            print(f"Context size ({current_tokens}) exceeds 80% of limit ({context_size_limit}). Compressing history.")
+            try:
+                result = self.engine.compress_messages(self._history)
+
+                # The claw-compactor README is ambiguous. Handle both a dict with a 'messages' key or a direct list.
+                new_history = None
+                if isinstance(result, dict) and 'messages' in result:
+                    new_history = result['messages']
+                elif isinstance(result, list):
+                    new_history = result
+
+                if new_history is not None:
+                    self._history = new_history
+                    new_tokens = sum(self._num_tokens(str(msg.get("content", ""))) for msg in self._history)
+                    print(f"History compressed. Token count reduced from {current_tokens} to {new_tokens}.")
+                else:
+                    print(f"Warning: compress_messages returned an unexpected structure ({type(result)}). History not compressed.")
+
+            except Exception as e:
+                print(f"Full history compression failed: {e}")
+
     def add_message(self, message: Dict[str, Any]):
         role = message.get("role")
         
@@ -77,8 +143,17 @@ class CompactContextProcessor(DefaultContextProcessor):
             name = message.get("name", "unknown")
             content = message.get("content", "")
             
-            # Strict Truncation Safety Net (~4000 chars is roughly 1000 tokens)
-            if len(content) > MAX_TOOL_RESULT_LEN:
+            # Use claw-compactor if available and content is large
+            if self.engine and len(content) > MAX_TOOL_RESULT_LEN:
+                print(f"CompactContextProcessor: Compressing tool output ({len(content)} chars) with FusionEngine...")
+                try:
+                    result = self.engine.compress(content, content_type="text")
+                    content = result.get("compressed", content)
+                except Exception as e:
+                    print(f"FusionEngine compression failed: {e}")
+                    content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large]..."
+            # Fallback to simple truncation
+            elif len(content) > MAX_TOOL_RESULT_LEN:
                 content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large. Please refine your query or use more specific tool arguments]..."
             
             tool_msg = {
@@ -100,7 +175,7 @@ class Agent:
         name: str,
         tools: List[Tool],
         options: Dict = {},
-        system_prompt="",
+        system_prompt=None,
         format=None,
         model=LLM_MODEL,
         endpoint = LLM_ENDPOINT,
@@ -141,6 +216,18 @@ class Agent:
         self.total_tokens_consumed = 0
         self.current_context_size = 0
 
+        if self.system_prompt:
+            self.context_processor.add_message({"role": "system", "content": self.system_prompt})
+
+        # Expose rewind tool to the LLM if context processor supports it
+        if hasattr(self.context_processor, "engine") and self.context_processor.engine:
+            self.tools["rewind_content"] = Tool(
+                name="rewind_content",
+                description="Retrieve the original uncompressed content using a rewind marker provided by the compactor.",
+                schema=RewindArgs,
+                func=lambda marker: self.context_processor.engine.rewind_store.retrieve(marker) or "Marker not found."
+            )
+
     @property
     def history(self) -> List[Dict[str, Any]]:
         return self.context_processor.get_messages(include_reasoning=True)
@@ -168,6 +255,8 @@ class Agent:
         """
         self.context_processor.clear()
         self.current_context_size = 0
+        if self.system_prompt:
+            self.context_processor.add_message({"role": "system", "content": self.system_prompt})
 
     def set_format(self, format):
         self.format = format
@@ -188,12 +277,12 @@ class Agent:
             self.context_processor.add_message({"role": "user", "content": followup})
             print("Followup chat::")
 
+        if hasattr(self.context_processor, 'compress_if_needed'):
+            self.context_processor.compress_if_needed(self.context_size)
+
         print(self.history)
         
-        messages = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
-        messages.extend(self.context_processor.get_messages(include_reasoning=False))
+        messages = self.context_processor.get_messages(include_reasoning=False)
 
         tools = [
             {
@@ -336,27 +425,8 @@ class Agent:
 
                 result = tool.func(**args_obj.model_dump())
                 result_str = json.dumps(result) if not isinstance(result, str) else result
-                
-                print(result)
-                if USE_TOOL_SUMMARIZER:
-                    # Context Condensation Step
-                    print(f"[{self.name}] Condensing tool output ({len(result_str)} chars)...")
-                    
-                    # Hard limit input to summarizer to prevent crashing the sub-agent
-                    if len(result_str) > 50000:
-                        result_str = result_str[:50000] + "\n...[TRUNCATED FOR SUMMARIZER]"
-                        
-                    summarizer = ToolSummaryAgent(endpoint=LLM_ENDPOINT)
-                    condensed = summarizer.summarize(
-                        tool_name=tool_name,
-                        tool_args=json.dumps(arguments),
-                        raw_output=result_str,
-                        reflective_thinking=reflective_thinking
-                    )
-                    result = condensed
-                    print(f"[{self.name}] Condensation complete. Reduced to {len(condensed)} chars.")
-                
-                results.append({"tool": tool_name, "result": result})
+
+                results.append({"tool": tool_name, "result": result_str})
 
                 # Add result back to conversation history
                 self.context_processor.add_message(
@@ -364,7 +434,9 @@ class Agent:
                         "role": "tool",
                         "tool_call_id": call.get("id"),
                         "name": tool_name,
-                            "content": json.dumps(result) if not isinstance(result, str) else result,
+                        "content": result_str,
+                        "tool_args": json.dumps(arguments),
+                        "reflective_thinking": reflective_thinking,
                     }
                 )
 
@@ -431,10 +503,7 @@ class ToolSummaryAgent(Agent):
         self.clear_history()
         self.context_processor.add_message({"role": "user", "content": prompt})
         
-        messages = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
-        messages.extend(self.context_processor.get_messages(include_reasoning=False))
+        messages = self.context_processor.get_messages(include_reasoning=False)
         
         print(f'Summarizer input to {self.model}:')
         print(messages)

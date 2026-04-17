@@ -38,7 +38,7 @@ def lookup_file(filename, pattern, options=None):
         return
 
     try:
-        tc = TreeContext(filename, code, color=False, verbose=False, line_number=False)
+        tc = TreeContext(filename, code, color=False, verbose=False, line_number=True, mark_lois=False)
     except ValueError:
         return
 

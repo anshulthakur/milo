@@ -42,10 +42,7 @@ class ModuleSummarizerAgent(Agent):
         self.clear_history()
         self.context_processor.add_message({"role": "user", "content": prompt})
 
-        messages = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
-        messages.extend(self.context_processor.get_messages(include_reasoning=False))
+        messages = self.context_processor.get_messages(include_reasoning=False)
 
         try:
             response = self.client.chat.completions.create(

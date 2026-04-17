@@ -107,6 +107,10 @@ class ReplaceSnippetArgs(BaseModel):
     search_text: str = Field(..., description="The exact text to be replaced. Must match the file's contents perfectly, including indentation and whitespace. Include enough context to make it unique.")
     replace_text: str = Field(..., description="The new text that will replace the search_text.")
 
+class RewindArgs(BaseModel):
+    marker: str = Field(..., description="The rewind marker string (e.g., abc123def456) to retrieve original uncompressed content.")
+
+
 # ---- Tool Builder ----
 def build_tool(
     name: str, description: str, model: type[BaseModel], func: Callable
