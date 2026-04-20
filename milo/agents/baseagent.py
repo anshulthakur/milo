@@ -227,6 +227,7 @@ class Agent:
         endpoint = LLM_ENDPOINT,
         context_processor: ContextProcessor = None,
         context_size: int = 16000,
+        max_steps: int = 15,
     ):
         """
         Initialize an Agent instance connected to an OpenAI-compatible LLM service.
@@ -268,6 +269,7 @@ class Agent:
         self.format = format
         self.context_processor = context_processor or CompactContextProcessor()
         self.context_size = context_size
+        self.max_steps = max_steps
         self.total_tokens_consumed = 0
         self.current_context_size = 0
         self._last_tool_calls = None
@@ -320,18 +322,19 @@ class Agent:
     def set_format(self, format):
         self.format = format
 
-    def call(self, followup: str = None) -> Any:
+    def call(self, followup: str = None, current_step: int = 0) -> Any:
         """
         Executes a chat sequence with optional follow-up instruction. Handles message history tracking,
         tool registration, and client interaction.
     
         Args:
             followup (str, optional): User-provided follow-up instruction to append to message history. 
-                                        Defaults to None, which uses existing conversation history.
-    
-        Returns:
-            Any: Processed response message from chat client, typically containing AI-generated content.
+            current_step (int): Execution step counter to prevent infinite looping.
         """
+        if current_step >= self.max_steps:
+            print(f"[{self.name}] Max steps ({self.max_steps}) reached. Aborting to prevent infinite loop.")
+            return "ERROR: Agent exceeded maximum allowed steps. Task aborted."
+
         if followup is not None:
             self.context_processor.add_message({"role": "user", "content": followup})
             print("Followup chat::")
@@ -463,9 +466,9 @@ class Agent:
         self.context_processor.add_message(message_dict)
         print("Reply::")
         print(message_dict)
-        return self._handle_response(message_dict)
+        return self._handle_response(message_dict, current_step=current_step)
 
-    def _handle_response(self, message: Dict[str, Any]) -> Any:
+    def _handle_response(self, message: Dict[str, Any], current_step: int = 0) -> Any:
         """
         Processes and executes tool calls from an incoming message dictionary.
         If no tool calls, it cleans and returns the content.
@@ -578,7 +581,7 @@ class Agent:
                 "content": error_msg,
                 "ephemeral": True
             })
-            return self.call()
+            return self.call(current_step=current_step + 1)
 
         results = []
         for call in tool_calls:
@@ -651,7 +654,7 @@ class Agent:
                 )
                 print(tb)
 
-        return self.call()
+        return self.call(current_step=current_step + 1)
 
 
 class ToolSummaryInput(BaseModel):

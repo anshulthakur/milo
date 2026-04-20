@@ -115,6 +115,11 @@ class RewindArgs(BaseModel):
     marker: str = Field(..., description="The rewind marker string (e.g., abc123def456) to retrieve original uncompressed content.")
 
 
+class DelegateTaskArgs(BaseModel):
+    task: str = Field(..., description="The precise, isolated question or research task you need the sub-agent to answer (e.g., 'Find where the variable X is defined and its type').")
+    context: str = Field(..., description="Brief context on why this is being asked, so the sub-agent understands the perspective without getting distracted by the overall objective.")
+
+
 # ---- Tool Builder ----
 def build_tool(
     name: str, description: str, model: type[BaseModel], func: Callable
