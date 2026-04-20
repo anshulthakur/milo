@@ -1,3 +1,4 @@
+import subprocess
 from grep_ast.main import enumerate_files
 from grep_ast.grep_ast import TreeContext
 
@@ -6,6 +7,47 @@ from pathlib import Path
 import pathspec
 import traceback
 from git import Repo
+
+
+def lookup_file_simple(filename, pattern, options=None):
+    """
+    Searches a file for a pattern using native system grep.
+    """
+    grep_options = {
+        "ignore-case": False,
+    }
+    if options:
+        grep_options.update(options)
+        
+    cmd = ["grep", "-n", "-E"]
+    if grep_options.get("ignore-case"):
+        cmd.append("-i")
+    cmd.extend([pattern, str(filename)])
+
+    try:
+        # Using subprocess instead of the 'sh' library to avoid an external dependency
+        # while still securely wrapping the native system 'grep' command.
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout:
+            return result.stdout.strip()
+        return None
+    except FileNotFoundError:
+        # Fallback if grep isn't installed
+        import re
+        try:
+            with open(filename, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+            flags = re.IGNORECASE if grep_options.get("ignore-case") else 0
+            regex = re.compile(pattern, flags)
+            matches = []
+            for i, line in enumerate(lines):
+                if regex.search(line):
+                    matches.append(f"{i+1}:{line.rstrip()}")
+            if matches:
+                return "\n".join(matches)
+        except Exception:
+            pass
+        return None
 
 
 def lookup_file(filename, pattern, options=None):
@@ -56,7 +98,8 @@ def grep_ast(
     query: str,
     file_hint=None,
     repo_path="",
-    page: int = 1
+    page: int = 1,
+    ast_context: bool = False
 ) -> dict | None:
     """
     Recursively searches for a string pattern in files within a repository, respecting .gitignore exclusions.
@@ -112,7 +155,10 @@ def grep_ast(
             spec = pathspec.PathSpec.from_lines("gitwildmatch", [])
         results = {}
         for fname in enumerate_files([parent], spec):
-            matches = lookup_file(fname, query)
+            if ast_context:
+                matches = lookup_file(fname, query)
+            else:
+                matches = lookup_file_simple(fname, query)
             if matches is not None:
                 results[fname] = matches
 

@@ -232,7 +232,7 @@ if __name__ == "__main__":
         self.assertIn("file2.c::main", callers)
 
     def test_fetch_function_body(self):
-        body = fetch_source_snippet("file1.py::my_function", self.G, self.metadata, repo_path=str(self.test_repo_path))
+        body = fetch_source_snippet("file1.py::my_function", self.G, self.metadata, repo_path=str(self.test_repo_path), strip_comments=False)
         self.assertEqual(body.strip(), '''def my_function(a, b):
     """This is a sample function."""
     list_comp = [i*i for i in range(a, b)]

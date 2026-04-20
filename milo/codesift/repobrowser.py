@@ -10,6 +10,33 @@ from milo.codesift.parsers import supported_languages
 from tree_sitter import Node, Tree
 
 
+def _strip_comments(code: str, filepath: str) -> str:
+    extension = get_file_extension(filepath)
+    if len(extension) == 0:
+        extension = guess_extension_from_shebang(file_path=filepath)
+        
+    lang_val = ""
+    try:
+        lang = get_programming_language(extension)
+        if lang:
+            lang_val = lang.value
+    except Exception:
+        pass
+        
+    if lang_val in ["python", "ruby", "shell", "bash"]:
+        code = re.sub(r'(?m)^[ \t]*#.*$\n?', '', code)
+        code = re.sub(r'[ \t]+#.*$', '', code)
+        if lang_val == "python":
+            code = re.sub(r'(?m)^[ \t]*"""[\s\S]*?"""[ \t]*\n?', '', code)
+            code = re.sub(r"(?m)^[ \t]*'''[\s\S]*?'''[ \t]*\n?", '', code)
+    else:
+        code = re.sub(r'/\*[\s\S]*?\*/\n?', '', code)
+        code = re.sub(r'(?m)^[ \t]*//.*$\n?', '', code)
+        code = re.sub(r'[ \t]+//.*$', '', code)
+        
+    return code.rstrip() + '\n'
+
+
 def resolve_function_name(
     name: str, metadata: dict, file_hint: str = None
 ) -> str | None:
@@ -268,7 +295,7 @@ def _get_qualified_name_from_node(func_node):
     return name
 
 def lookaround_source_snippet(
-    fn_id, G, metadata=None, context_lines=0, repo_path="", file_hint=None
+    fn_id, G, metadata=None, context_lines=0, repo_path="", file_hint=None, strip_comments=True
 ):
     """
     Fetches source code snippet containing the definition of a specified function,
@@ -323,14 +350,17 @@ def lookaround_source_snippet(
             if re.search(rf"\b{re.escape(short_name)}\b", line):
                 start = max(i - context_lines, 0)
                 end = min(i + context_lines + 1, len(lines))
-                return "".join(lines[start:end])
+                snippet = "".join(lines[start:end])
+                if strip_comments:
+                    snippet = _strip_comments(snippet, filepath)
+                return snippet
         return ""
     except Exception:
         traceback.print_exc()
         return ""
 
 
-def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
+def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None, strip_comments=True):
     """
     Fetch the source code implementation of a function from the repository graph.
 
@@ -398,7 +428,10 @@ def fetch_source_snippet(fn_id, G, metadata=None, repo_path="", file_hint=None):
         for func in functions:
             qname = _get_qualified_name_from_node(func)
             if qname == func_name:
-                return func.source_code
+                snippet = func.source_code
+                if strip_comments:
+                    snippet = _strip_comments(snippet, filepath)
+                return snippet
         return ""
     except Exception:
         traceback.print_exc()

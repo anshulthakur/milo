@@ -1052,6 +1052,9 @@ class TestCrabCoverageMocked(unittest.TestCase):
 
 class MockGrepArgs(BaseModel):
     query: str
+    ast_context: bool = False
+    page: int = 1
+    file_path: str = None
 
 
 class TestAgentReasoningAndCondensation(unittest.TestCase):
@@ -1096,7 +1099,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         ]
         
         # Create a tool that returns a huge payload
-        def massive_grep(query):
+        def massive_grep(query, **kwargs):
             return "MATCH data " * 1000  # ~11,000 chars, well over MAX_TOOL_RESULT_LEN (4000)
             
         grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)
@@ -1163,7 +1166,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         ]
         
         # Create a tool that returns a huge payload
-        def massive_grep(query):
+        def massive_grep(query, **kwargs):
             return "MATCH data " * 1000  # ~11,000 chars
             
         grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)
@@ -1215,7 +1218,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
             MagicMock(choices=[MagicMock(message=final_message)])
         ]
         
-        grep_tool = Tool(name="grep_keyword", description="Search", func=lambda query: "MATCH data " * 1000, schema=MockGrepArgs)
+        grep_tool = Tool(name="grep_keyword", description="Search", func=lambda query, **kwargs: "MATCH data " * 1000, schema=MockGrepArgs)
         agent = Agent(name="TestOrchestrator", tools=[grep_tool])
         
         agent.context_processor.engine = MagicMock()
@@ -1285,7 +1288,7 @@ class TestContextCompression(unittest.TestCase):
         mock_response.usage.total_tokens = 100
         mock_client.chat.completions.create.return_value = mock_response
         
-        def massive_grep(query):
+        def massive_grep(query, **kwargs):
             return "MATCH data " * 1000  # Large output (~11,000 chars)
             
         grep_tool = Tool(name="grep_keyword", description="Search", func=massive_grep, schema=MockGrepArgs)

@@ -70,6 +70,10 @@ class GrepContext(BaseModel):
         1,
         description="Page number of the results to fetch. Default is 1."
     )
+    ast_context: Optional[bool] = Field(
+        False,
+        description="If True, includes AST-aware context around the matches. If False, returns simple line matches. Default is False."
+    )
 
 
 class ListDirectoryArgs(BaseModel):

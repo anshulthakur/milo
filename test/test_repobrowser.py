@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from milo.codesift.repograph import create_repograph
-from milo.codesift.repobrowser import CallFlowAnalyzer, load_repo_graph, resolve_function_name, fetch_source_snippet
+from milo.codesift.repobrowser import CallFlowAnalyzer, load_repo_graph, resolve_function_name, fetch_source_snippet, lookaround_source_snippet
 
 class TestCallFlowAnalyzer(unittest.TestCase):
     
@@ -22,6 +22,7 @@ GLOBAL_VAR = "Hello"
 
 def decorator(func):
     def wrapper(*args, **kwargs):
+        # This is a python comment
         print("Decorator before call")
         result = func(*args, **kwargs)
         print("Decorator after call")
@@ -45,6 +46,14 @@ async def async_function():
     print("Async function start")
     await asyncio.sleep(1)
     print("Async function end")
+
+def multiline_doc_func():
+    \"\"\"
+    This is a
+    multiline docstring.
+    \"\"\"
+    fake_doc = \"\"\"This should not be stripped\"\"\"
+    return fake_doc
 
 def generator_function(n):
     for i in range(n):
@@ -81,7 +90,17 @@ int function2(void) {
     return inline_function(global_variable);
 }
 
+void function3(void) {
+    /*
+     * This is a
+     * multiline
+     * C comment
+     */
+    printf("function3\\n");
+}
+
 int main(int argc, char *argv[]) {
+    // This is a C comment
     function1(5, "hello");
     int result = function2();
     printf("Result from function2: %d\\n", result);
@@ -196,8 +215,10 @@ if __name__ == "__main__":
             'file1.py::async_function',
             'file1.py::decorator',
             'file1.py::generator_function',
+            'file1.py::multiline_doc_func',
             'file1.py::my_function',
             'file1.py::wrapper',
+            'file2.c::function3',
             'file2.c::main',
             'file5.c::main',
             'file5.c::thread_function',
@@ -273,6 +294,80 @@ class TestRepoBrowserResolution(TestCallFlowAnalyzer):
         snippet = fetch_source_snippet("main", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c")
         self.assertIn('function1(5, "hello");', snippet)
         self.assertNotIn('pthread_create', snippet)
+
+    def test_strip_comments_in_snippets(self):
+        # Test fetch_source_snippet defaults to stripping comments
+        py_snippet = fetch_source_snippet("decorator", self.G, self.G.graph, repo_path=str(self.test_repo_path))
+        self.assertNotIn("# This is a python comment", py_snippet)
+        
+        py_snippet_doc = fetch_source_snippet("my_function", self.G, self.G.graph, repo_path=str(self.test_repo_path))
+        self.assertNotIn("This is a sample function.", py_snippet_doc)
+        
+        c_snippet = fetch_source_snippet("main", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c")
+        self.assertNotIn("// This is a C comment", c_snippet)
+        
+        # Test fetch_source_snippet with strip_comments=False
+        py_snippet_kept = fetch_source_snippet("decorator", self.G, self.G.graph, repo_path=str(self.test_repo_path), strip_comments=False)
+        self.assertIn("# This is a python comment", py_snippet_kept)
+        
+        py_snippet_doc_kept = fetch_source_snippet("my_function", self.G, self.G.graph, repo_path=str(self.test_repo_path), strip_comments=False)
+        self.assertIn("This is a sample function.", py_snippet_doc_kept)
+        
+        c_snippet_kept = fetch_source_snippet("main", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c", strip_comments=False)
+        self.assertIn("// This is a C comment", c_snippet_kept)
+        
+        # Test multiline docstring and skipped docstring in Python
+        py_snippet_multi = fetch_source_snippet("multiline_doc_func", self.G, self.G.graph, repo_path=str(self.test_repo_path))
+        self.assertNotIn("multiline docstring", py_snippet_multi)
+        self.assertIn("This should not be stripped", py_snippet_multi)
+        
+        # Test multiline C comment
+        c_snippet_multi = fetch_source_snippet("function3", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c")
+        self.assertNotIn("multiline", c_snippet_multi)
+        self.assertNotIn("C comment", c_snippet_multi)
+        self.assertIn("printf", c_snippet_multi)
+        
+        # With strip_comments=False
+        py_snippet_multi_kept = fetch_source_snippet("multiline_doc_func", self.G, self.G.graph, repo_path=str(self.test_repo_path), strip_comments=False)
+        self.assertIn("multiline docstring", py_snippet_multi_kept)
+        
+        c_snippet_multi_kept = fetch_source_snippet("function3", self.G, self.G.graph, repo_path=str(self.test_repo_path), file_hint="file2.c", strip_comments=False)
+        self.assertIn("multiline", c_snippet_multi_kept)
+        
+        # Test lookaround_source_snippet defaults to stripping comments
+        py_lookaround = lookaround_source_snippet("decorator", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path))
+        self.assertNotIn("# This is a python comment", py_lookaround)
+        
+        py_lookaround_doc = lookaround_source_snippet("my_function", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path))
+        self.assertNotIn("This is a sample function.", py_lookaround_doc)
+        
+        c_lookaround = lookaround_source_snippet("main", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), file_hint="file2.c")
+        self.assertNotIn("// This is a C comment", c_lookaround)
+        
+        # Test lookaround_source_snippet with strip_comments=False
+        py_lookaround_kept = lookaround_source_snippet("decorator", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), strip_comments=False)
+        self.assertIn("# This is a python comment", py_lookaround_kept)
+        
+        py_lookaround_doc_kept = lookaround_source_snippet("my_function", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), strip_comments=False)
+        self.assertIn("This is a sample function.", py_lookaround_doc_kept)
+        
+        c_lookaround_kept = lookaround_source_snippet("main", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), file_hint="file2.c", strip_comments=False)
+        self.assertIn("// This is a C comment", c_lookaround_kept)
+
+        # Test lookaround multiline / skipped
+        py_lookaround_multi = lookaround_source_snippet("multiline_doc_func", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path))
+        self.assertNotIn("multiline docstring", py_lookaround_multi)
+        self.assertIn("This should not be stripped", py_lookaround_multi)
+
+        c_lookaround_multi = lookaround_source_snippet("function3", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), file_hint="file2.c")
+        self.assertNotIn("multiline", c_lookaround_multi)
+        self.assertNotIn("C comment", c_lookaround_multi)
+
+        py_lookaround_multi_kept = lookaround_source_snippet("multiline_doc_func", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), strip_comments=False)
+        self.assertIn("multiline docstring", py_lookaround_multi_kept)
+
+        c_lookaround_multi_kept = lookaround_source_snippet("function3", self.G, metadata=self.G.graph, context_lines=5, repo_path=str(self.test_repo_path), file_hint="file2.c", strip_comments=False)
+        self.assertIn("multiline", c_lookaround_multi_kept)
 
 class TestCallFlowAnalyzerGit(TestCallFlowAnalyzer):
     def setUp(self):
