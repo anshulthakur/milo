@@ -205,6 +205,8 @@ class CompactContextProcessor(DefaultContextProcessor):
                 except Exception as e:
                     print(f"FusionEngine compression failed: {e}")
                     content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large]..."
+            elif tool_name == "delegate_research_task":
+                print("Skip compression  for delegator")
             # Fallback to simple truncation
             elif len(content) > MAX_TOOL_RESULT_LEN:
                 content = content[:MAX_TOOL_RESULT_LEN] + "\n\n...[TRUNCATED: Tool output too large. Please refine your query or use more specific tool arguments]..."
@@ -554,7 +556,8 @@ class Agent:
                         return fixed_content
                     except Exception as e:
                         print(f"[{self.name}] Failed to fix formatting: {e}")
-                        
+            
+            print(f"Returning:: {content}")
             return content
                 
         current_signature = [(tc.get("function", {}).get("name"), tc.get("function", {}).get("arguments")) for tc in tool_calls]
