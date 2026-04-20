@@ -1228,6 +1228,48 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         tool_msg = next(m for m in agent.history if m['role'] == 'tool')
         self.assertIn("Condensed grep output.", tool_msg['content'])
 
+    @patch('milo.agents.baseagent.OpenAI')
+    def test_missing_reasoning_in_tool_call(self, mock_openai):
+        """
+        Verifies that if the LLM forgets the 'reasoning' argument, it is silently patched
+        and the tool executes successfully without throwing a ValidationError.
+        """
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        
+        # 1. Main agent's first response: a tool call without reasoning
+        tool_call_message = MagicMock()
+        tool_call_message.role = "assistant"
+        tool_call_message.content = "Need to grep."
+        tool_call_message.reasoning = None
+        
+        mock_tc = MagicMock()
+        mock_tc.id = "call_abc123"
+        mock_tc.type = "function"
+        mock_tc.function.name = "grep_keyword"
+        mock_tc.function.arguments = '{"query": "test"}'
+        tool_call_message.tool_calls = [mock_tc]
+        
+        # 2. Main agent's final response: final JSON array
+        final_message = MagicMock()
+        final_message.role = "assistant"
+        final_message.content = "```json\n[]\n```"
+        final_message.reasoning = "Done."
+        final_message.tool_calls = None
+        
+        mock_client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=tool_call_message)]),
+            MagicMock(choices=[MagicMock(message=final_message)])
+        ]
+        
+        grep_tool = Tool(name="grep_keyword", description="Search", func=lambda query, **kwargs: "MATCH data", schema=MockGrepArgs)
+        agent = Agent(name="TestOrchestrator", tools=[grep_tool])
+        
+        result = agent.call("Find bugs")
+            
+        tool_msg = next(m for m in agent.history if m['role'] == 'tool')
+        self.assertIn("MATCH data", tool_msg['content'])
+
 class TestGrepAstPagination(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = Path('/tmp/grep_pagination_test').resolve()

@@ -193,9 +193,10 @@ class CompactContextProcessor(DefaultContextProcessor):
         
         if role == "tool":
             content = message.get("content", "")
+            tool_name = message.get("name", "")
             
             # Use claw-compactor if available and content is large
-            if self.engine:
+            if self.engine and tool_name != "delegate_research_task":
                 print(f"CompactContextProcessor: Compressing tool output ({len(content)} chars) with FusionEngine...")
                 try:
                     result = self.engine.compress(content, content_type="text")
@@ -576,6 +577,9 @@ class Agent:
                 arguments_str = call["function"].get("arguments", "{}")
                 arguments = json.loads(arguments_str)
                 
+                if isinstance(arguments, dict) and "reasoning" not in arguments:
+                    arguments["reasoning"] = ""
+
                 if self._tool_loop_count >= 2:
                     print(f"[{self.name}] Tool loop detected for {tool_name}. Sending loop break message.")
                     error_msg = "ERROR: Repeated identical tool call detected. You are in an infinite loop. Stop calling this tool with these arguments. Provide a final answer based on your current assessment."
