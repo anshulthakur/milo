@@ -508,10 +508,13 @@ class Agent:
         if not tool_calls:
             print("No tool calls")
             if content:
-                # Models sometimes wrap JSON in markdown, so we strip it.
-                match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", content)
-                if match:
-                    content = match.group(2).strip()
+                if self.format:
+                    # Models sometimes wrap JSON in markdown, so we strip it.
+                    match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", content)
+                    if match:
+                        content = match.group(2).strip()
+                    else:
+                        content = content.strip()
                 else:
                     content = content.strip()
                     
