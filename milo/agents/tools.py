@@ -3,6 +3,10 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 
+class BaseToolArgs(BaseModel):
+    reasoning: str = Field(..., description="A terse, single-sentence explanation of why you are calling this tool and what you are looking for.")
+
+
 class Tool:
     def __init__(
         self, name: str, description: str, func: Callable, schema: type[BaseModel]
@@ -35,12 +39,12 @@ class Tool:
 # ---- Tool Input Schemas ----
 
 
-class FetchSourceArgs(BaseModel):
+class FetchSourceArgs(BaseToolArgs):
     fn_name: str = Field(..., description="The function name to fetch source for")
     file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
-class LookaroundSourceArgs(BaseModel):
+class LookaroundSourceArgs(BaseToolArgs):
     fn_name: str = Field(..., description="The function name to fetch source for")
     context_lines: Optional[int] = Field(
         5, description="Number of lines of context around the function"
@@ -48,18 +52,18 @@ class LookaroundSourceArgs(BaseModel):
     file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
-class GetMetadataArgs(BaseModel):
+class GetMetadataArgs(BaseToolArgs):
     fn_name: str = Field(..., description="The function name to fetch metadata for")
     file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
-class GetNeighborsArgs(BaseModel):
+class GetNeighborsArgs(BaseToolArgs):
     fn_name: str = Field(..., description="The function name to find neighbors for")
     depth: Optional[int] = Field(2, description="Depth to traverse callers and callees")
     file_path: Optional[str] = Field(None, description="The file path where the function is defined")
 
 
-class GrepContext(BaseModel):
+class GrepContext(BaseToolArgs):
     query: str = Field(..., description="String query to search for in the codebase")
     file_path: Optional[str] = Field(
         None,
@@ -76,46 +80,46 @@ class GrepContext(BaseModel):
     )
 
 
-class ListDirectoryArgs(BaseModel):
+class ListDirectoryArgs(BaseToolArgs):
     target_path: Optional[str] = Field(".", description="The directory path to list, relative to the repository root.")
 
 
-class TreeDirectoryArgs(BaseModel):
+class TreeDirectoryArgs(BaseToolArgs):
     target_path: Optional[str] = Field(".", description="The directory path to tree, relative to the repository root.")
     depth: Optional[int] = Field(2, description="The maximum depth to traverse.")
 
 
-class ViewArchitectureArgs(BaseModel):
+class ViewArchitectureArgs(BaseToolArgs):
     pass
 
 
-class InspectModuleArgs(BaseModel):
+class InspectModuleArgs(BaseToolArgs):
     module_name: str = Field(..., description="The file path or module name to inspect (e.g., 'src/main.py')")
 
 
-class InspectCallFlowArgs(BaseModel):
+class InspectCallFlowArgs(BaseToolArgs):
     entry_function: str = Field(..., description="The fully qualified entry point function name to trace (e.g., 'main.py::main')")
 
 
-class CreateFileArgs(BaseModel):
+class CreateFileArgs(BaseToolArgs):
     file_path: str = Field(..., description="The path of the new file, relative to the repository root.")
     content: str = Field(..., description="The complete content of the new file.")
 
 
-class ApplyDiffArgs(BaseModel):
+class ApplyDiffArgs(BaseToolArgs):
     file_path: str = Field(..., description="The path of the file to patch, relative to the repository root.")
     diff: str = Field(..., description="A standard unified diff patch (including --- and +++ headers) to apply to the file. Ensure you provide enough context lines for the patch to apply cleanly.")
 
-class ReplaceSnippetArgs(BaseModel):
+class ReplaceSnippetArgs(BaseToolArgs):
     file_path: str = Field(..., description="The path of the file to modify, relative to the repository root.")
     search_text: str = Field(..., description="The exact text to be replaced. Must match the file's contents perfectly, including indentation and whitespace. Include enough context to make it unique.")
     replace_text: str = Field(..., description="The new text that will replace the search_text.")
 
-class RewindArgs(BaseModel):
+class RewindArgs(BaseToolArgs):
     marker: str = Field(..., description="The rewind marker string (e.g., abc123def456) to retrieve original uncompressed content.")
 
 
-class DelegateTaskArgs(BaseModel):
+class DelegateTaskArgs(BaseToolArgs):
     task: str = Field(..., description="The precise, isolated question or research task you need the sub-agent to answer (e.g., 'Find where the variable X is defined and its type').")
     context: str = Field(..., description="Brief context on why this is being asked, so the sub-agent understands the perspective without getting distracted by the overall objective.")
 
@@ -158,7 +162,9 @@ def build_tool(
     """
     def wrapped_func(**kwargs):
         parsed_args = model(**kwargs)
-        return func(**parsed_args.model_dump())
+        call_args = parsed_args.model_dump()
+        call_args.pop("reasoning", None)
+        return func(**call_args)
 
     return Tool(
         name=name,

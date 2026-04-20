@@ -12,10 +12,9 @@ from milo.codesift.parsers import Language
 from milo.codesift.parsers.treesitter import Treesitter
 from unittest.mock import patch, MagicMock
 from milo.codereview.codereview import run_crab, ReviewEngine
-from milo.agents.tools import FetchSourceArgs, GetMetadataArgs
+from milo.agents.tools import Tool, FetchSourceArgs, GetMetadataArgs, BaseToolArgs
 from milo.codereview.models import CodeReview, DefectEnum
 from milo.agents.baseagent import Agent
-from milo.agents.tools import Tool
 from pydantic import BaseModel
 
 
@@ -1050,7 +1049,7 @@ class TestCrabCoverageMocked(unittest.TestCase):
         self.assertEqual(len(store.get_reviews_by_file("script2.py")), 0)
 
 
-class MockGrepArgs(BaseModel):
+class MockGrepArgs(BaseToolArgs):
     query: str
     ast_context: bool = False
     page: int = 1
@@ -1079,7 +1078,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         mock_tc.id = "call_abc123"
         mock_tc.type = "function"
         mock_tc.function.name = "grep_keyword"
-        mock_tc.function.arguments = '{"query": "test"}'
+        mock_tc.function.arguments = '{"query": "test", "reasoning": "I need to find this"}'
         tool_call_message.tool_calls = [mock_tc]
         
         # 2. Main agent's final response: final JSON array + thinking
@@ -1146,7 +1145,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         mock_tc.id = "call_abc123"
         mock_tc.type = "function"
         mock_tc.function.name = "grep_keyword"
-        mock_tc.function.arguments = '{"query": "test"}'
+        mock_tc.function.arguments = '{"query": "test", "reasoning": "I need to find this natively"}'
         tool_call_message.tool_calls = [mock_tc]
         
         # 2. Main agent's final response: final JSON array + native reasoning
@@ -1202,7 +1201,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         # 1. Main agent's first response: hallucinated tool call in content
         hallucinated_message = MagicMock()
         hallucinated_message.role = "assistant"
-        hallucinated_message.content = '[Tool Call] Name: grep_keyword | Args: {"query": "test"}'
+        hallucinated_message.content = '[Tool Call] Name: grep_keyword | Args: {"query": "test", "reasoning": "Thinking about using grep."}'
         hallucinated_message.reasoning = "Thinking about using grep."
         hallucinated_message.tool_calls = None
         
@@ -1301,7 +1300,7 @@ class TestContextCompression(unittest.TestCase):
                 {
                     "id": "call_123",
                     "type": "function",
-                    "function": {"name": "grep_keyword", "arguments": '{"query": "test"}'}
+                    "function": {"name": "grep_keyword", "arguments": '{"query": "test", "reasoning": "I need to test compression"}'}
                 }
             ]
         }

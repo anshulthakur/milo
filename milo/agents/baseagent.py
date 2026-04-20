@@ -256,7 +256,7 @@ class Agent:
         self.tools: Dict[str, Tool] = {t.name: t for t in tools}
         
         if self.tools:
-            prompt_addition = "IMPORTANT: You must provide your reasoning for using tools. Do not arbitrarily use tools without explaining your objective. If you have already reached a conclusion, DO NOT invoke any tools. Just output your final answer."
+            prompt_addition = "IMPORTANT: You must provide a terse reasoning for using tools in the tool call's 'reasoning' argument. If you have already reached a conclusion, DO NOT invoke any tools. Just output your final answer."
             if self.system_prompt:
                 self.system_prompt = f"{self.system_prompt}\n{prompt_addition}"
             else:
@@ -284,7 +284,7 @@ class Agent:
                 name="rewind_content",
                 description="Retrieve the original uncompressed content using a rewind marker provided by the compactor.",
                 schema=RewindArgs,
-                func=lambda marker: self.context_processor.engine.rewind_store.retrieve(marker) or "Marker not found."
+                func=lambda marker, **kwargs: self.context_processor.engine.rewind_store.retrieve(marker) or "Marker not found."
             )
 
     @property
@@ -567,21 +567,6 @@ class Agent:
             self.context_processor.prune_old_tool_calls(tool_calls)
 
         reflective_thinking = message.get("reasoning") or message.get("content", "").strip()
-
-        if not reflective_thinking:
-            print(f"[{self.name}] Unreasoned tool call detected. Sending reprimand.")
-            error_msg = "ERROR: You must provide your reasoning before calling tools. Do not arbitrarily use tools without explaining why. Please focus on the objective and state your reasoning."
-            
-            if hasattr(self.context_processor, "_history") and self.context_processor._history:
-                if self.context_processor._history[-1].get("role") == "assistant":
-                    self.context_processor._history[-1]["ephemeral"] = True
-
-            self.context_processor.add_message({
-                "role": "user",
-                "content": error_msg,
-                "ephemeral": True
-            })
-            return self.call(current_step=current_step + 1)
 
         results = []
         for call in tool_calls:
