@@ -106,11 +106,25 @@ class DefaultContextProcessor(ContextProcessor):
             return self._history
             
         messages = []
-        for msg in self._history:
+        for i, msg in enumerate(self._history):
             msg_copy = msg.copy()
+            
+            # Skip ephemeral messages if they are no longer part of the active recovery turn
+            is_ephemeral = msg_copy.pop("ephemeral", False)
+            if is_ephemeral:
+                is_followed_by_non_ephemeral = any(not m.get("ephemeral") for m in self._history[i+1:])
+                if is_followed_by_non_ephemeral:
+                    continue
+
             msg_copy.pop("reasoning", None)
             msg_copy.pop("reflective_thinking", None)
             msg_copy.pop("tool_args", None)
+            
+            if msg_copy.get("role") == "assistant" and msg_copy.get("tool_calls"):
+                # Do not feed back reasoning content on subsequent calls (when a newer assistant message exists)
+                if any(m.get("role") == "assistant" for m in self._history[i+1:]):
+                    msg_copy["content"] = ""
+                    
             messages.append(msg_copy)
         return messages
 
@@ -554,9 +568,15 @@ class Agent:
         if not reflective_thinking:
             print(f"[{self.name}] Unreasoned tool call detected. Sending reprimand.")
             error_msg = "ERROR: You must provide your reasoning before calling tools. Do not arbitrarily use tools without explaining why. Please focus on the objective and state your reasoning."
+            
+            if hasattr(self.context_processor, "_history") and self.context_processor._history:
+                if self.context_processor._history[-1].get("role") == "assistant":
+                    self.context_processor._history[-1]["ephemeral"] = True
+
             self.context_processor.add_message({
                 "role": "user",
                 "content": error_msg,
+                "ephemeral": True
             })
             return self.call()
 
@@ -572,10 +592,20 @@ class Agent:
                     print(f"[{self.name}] Tool loop detected for {tool_name}. Sending loop break message.")
                     error_msg = "ERROR: Repeated identical tool call detected. You are in an infinite loop. Stop calling this tool with these arguments. Provide a final answer based on your current assessment."
                     results.append({"tool": tool_name, "result": error_msg})
+                    
+                    # Remove the looping tool call from the assistant message in history
+                    if hasattr(self.context_processor, "_history") and self.context_processor._history:
+                        last_msg = self.context_processor._history[-1]
+                        if last_msg.get("role") == "assistant" and last_msg.get("tool_calls"):
+                            last_msg["tool_calls"] = [tc for tc in last_msg["tool_calls"] if tc["id"] != call["id"]]
+                            if not last_msg["tool_calls"]:
+                                last_msg["tool_calls"] = None
+                                
                     self.context_processor.add_message(
                         {
                             "role": "user",
                             "content": error_msg,
+                            "ephemeral": True
                         }
                     )
                     continue
