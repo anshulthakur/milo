@@ -22,7 +22,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
     if not comb_agent:
         G, metadata = load_repo_graph(json_path=metadata_path)
         
-        def get_read_only_tools():
+        def get_subagent_tools():
             return [
                 build_tool(
                     "fetch_source_snippet",
@@ -59,7 +59,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
         def delegate_task(task: str, context: str) -> str:
             subagent = Agent(
                 name="ResearchSubAgent",
-                tools=get_read_only_tools(),
+                tools=get_subagent_tools(),
                 model="comb",
                 max_steps=10,
                 system_prompt=(
@@ -72,15 +72,32 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
             prompt = f"Context: {context}\n\nTask: {task}\n\nPlease find the answer using your tools and return a concise summary of your findings including relevant code."
             return subagent.call(prompt)
             
-        tools = get_read_only_tools()
-        tools.append(
+        tools = [
+            build_tool(
+                "fetch_source_snippet",
+                "Fetch the source code implementation of a function from the repo.",
+                FetchSourceArgs,
+                lambda fn_name, file_path=None: fetch_source_snippet(fn_id=fn_name, G=G, metadata=metadata, repo_path=repo_path, file_hint=file_path),
+            ),
+            build_tool(
+                "get_function_metadata",
+                "Retrieve structured metadata (like callers, callees, arguments, and file path) for a function.",
+                GetMetadataArgs,
+                lambda fn_name, file_path=None: get_function_metadata(G=G, fn_id=fn_name, metadata=metadata, file_hint=file_path),
+            ),
+            build_tool(
+                "get_contextual_neighbors",
+                "Find functions that are callers or callees within a given depth from a function.",
+                GetNeighborsArgs,
+                lambda fn_name, depth=2, file_path=None: get_contextual_neighbors(G=G, fn_id=fn_name, depth=depth, metadata=metadata, file_hint=file_path),
+            ),
             build_tool(
                 "delegate_research_task",
                 "Delegates a specific, isolated research question to a sub-agent. Use this to find definitions, usages, or trace variables without bloating your own context window.",
                 DelegateTaskArgs,
                 delegate_task
             )
-        )
+        ]
         
         comb_agent = Agent(
             name="DocumentationAgent",

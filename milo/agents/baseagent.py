@@ -256,7 +256,7 @@ class Agent:
         self.tools: Dict[str, Tool] = {t.name: t for t in tools}
         
         if self.tools:
-            prompt_addition = "IMPORTANT: You must provide your reasoning for using tools. Do not arbitrarily use tools without explaining your objective."
+            prompt_addition = "IMPORTANT: You must provide your reasoning for using tools. Do not arbitrarily use tools without explaining your objective. If you have already reached a conclusion, DO NOT invoke any tools. Just output your final answer."
             if self.system_prompt:
                 self.system_prompt = f"{self.system_prompt}\n{prompt_addition}"
             else:
