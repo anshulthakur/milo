@@ -15,6 +15,16 @@ from milo.utils.vcs import FileManager
 
 from milo.agents.documentation import get_agent as get_documentation_agent
 
+try:
+    from claw_compactor import FusionEngine
+except ImportError:
+    try:
+        from claw_compactor.fusion.engine import FusionEngine
+    except ImportError:
+        FusionEngine = None
+
+compactor_engine = FusionEngine() if FusionEngine else None
+
 class InputCode(BaseModel):
     language: str
     method: str
@@ -398,6 +408,17 @@ def run_comb(file_manager: Optional[FileManager] = None, repo_root: Optional[str
                     if node.doc_comment and node.doc_comment not in node.source_code:
                         method_comment = node.doc_comment
                     try:
+                        if compactor_engine:
+                            try:
+                                comp_result = compactor_engine.compress(
+                                    text=method_source_code,
+                                    content_type="code",
+                                    language=programming_language.value
+                                )
+                                method_source_code = comp_result.get("compressed", method_source_code)
+                            except Exception:
+                                pass
+
                         request = ("Please revise the docstring for the provided method. "
                                    "Return the result in JSON format using the schema provided. "
                                    "Use tools to fetch further context from the repository graph to ensure documentation relevance. "

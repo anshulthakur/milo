@@ -14,6 +14,16 @@ from milo.codereview.diff import DiffUtils
 from milo.utils.vcs import FileManager
 from milo.codereview.state import ReviewStore, Review, ReviewAnchor, ReviewStatus
 
+try:
+    from claw_compactor import FusionEngine
+except ImportError:
+    try:
+        from claw_compactor.fusion.engine import FusionEngine
+    except ImportError:
+        FusionEngine = None
+
+compactor_engine = FusionEngine() if FusionEngine else None
+
 def _translate_virtual_lines(text: str, line_map: Dict[int, int]) -> str:
     if not text or not line_map:
         return text
@@ -40,6 +50,17 @@ class ReviewEngine:
         if not open_reviews:
             return []
             
+        if compactor_engine:
+            try:
+                comp_result = compactor_engine.compress(
+                    text=code,
+                    content_type="code",
+                    language=lang
+                )
+                code = comp_result.get("compressed", code)
+            except Exception:
+                pass
+
         issues_list = [{"id": r.id, "issue": r.conversation[0].content if r.conversation else "Unknown issue"} for r in open_reviews]
         issues_json = json.dumps(issues_list)
         
@@ -79,6 +100,17 @@ class ReviewEngine:
 
     def discover_reviews(self, lang: str, code: str, file_path: str, hunk_text: Optional[str], open_reviews: List[Review], line_map: Optional[Dict[int, int]] = None) -> list:
         try:
+            if compactor_engine:
+                try:
+                    comp_result = compactor_engine.compress(
+                        text=code,
+                        content_type="code",
+                        language=lang
+                    )
+                    code = comp_result.get("compressed", code)
+                except Exception:
+                    pass
+
             known_issues_text = ""
             if open_reviews:
                 issues_list = [r.conversation[0].content if r.conversation else "Unknown issue" for r in open_reviews]
