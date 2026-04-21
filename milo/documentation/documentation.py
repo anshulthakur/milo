@@ -398,14 +398,19 @@ def run_comb(file_manager: Optional[FileManager] = None, repo_root: Optional[str
                     if node.doc_comment and node.doc_comment not in node.source_code:
                         method_comment = node.doc_comment
                     try:
-                        user_prompt = InputCode(language = programming_language.value, 
-                                    method=method_source_code, 
-                                    docstring = method_comment or "",
-                                    file_path=rel_file_path)
+                        request = ("Please revise the docstring for the provided method. "
+                                   "Return the result in JSON format using the schema provided. "
+                                   "Use tools to fetch further context from the repository graph to ensure documentation relevance. "
+                                   "However, DO NOT use tools to fetch the source code of the function currently being documented, as it is already provided below.")
+                        
+                        user_prompt = f"{request}\n\nFile: `{rel_file_path}`\n\n"
+                        if method_comment:
+                            user_prompt += f"### Existing Docstring\n```text\n{method_comment}\n```\n\n"
+                        user_prompt += f"### Full Source\n```{programming_language.value}\n{method_source_code}\n```"
             
                         agent.clear_history()
                         agent.set_format(CommentedCode.model_json_schema())
-                        response = agent.call(user_prompt.model_dump_json())
+                        response = agent.call(user_prompt)
                         
                         comment = CommentedCode.model_validate_json(response)
                         

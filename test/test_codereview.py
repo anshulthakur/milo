@@ -411,7 +411,7 @@ class TestCrabIntegration(unittest.TestCase):
         ]
         
         def agent_side_effect(payload):
-            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+            if "OPEN or RESOLVED" in payload:
                 return json.dumps([])
             return json.dumps(review_payload)
         mock_agent_instance.call.side_effect = agent_side_effect
@@ -431,13 +431,11 @@ class TestCrabIntegration(unittest.TestCase):
         # Verify the payload sent to the agent
         call_args = mock_agent_instance.call.call_args
         self.assertIsNotNone(call_args, "Agent should have been called")
-        payload_json = call_args[0][0]
-        payload = json.loads(payload_json)
+        prompt = call_args[0][0]
         
-        self.assertEqual(payload.get("file_path"), "app.py")
-        self.assertIn("diff_hunk", payload)
-        self.assertIn("print('hello world') # changed", payload["diff_hunk"])
-        self.assertIn("You are reviewing changes in `app.py`", payload["request"])
+        self.assertIn("`app.py`", prompt)
+        self.assertIn("print('hello world') # changed", prompt)
+        self.assertIn("You are reviewing changes in `app.py`", prompt)
 
         review_store_path = self.repo_path / ".milo" / "reviews.json"
         self.assertTrue(review_store_path.exists())
@@ -487,7 +485,7 @@ class TestCrabIntegration(unittest.TestCase):
         ]
         
         def agent_side_effect(payload):
-            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+            if "OPEN or RESOLVED" in payload:
                 return json.dumps([])
             return json.dumps(review_payload)
         mock_agent_instance.call.side_effect = agent_side_effect
@@ -538,7 +536,7 @@ class TestCrabIntegration(unittest.TestCase):
         ]
         
         def agent_side_effect(payload):
-            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+            if "OPEN or RESOLVED" in payload:
                 return json.dumps([])
             return json.dumps(review_payload)
         mock_agent_instance.call.side_effect = agent_side_effect
@@ -567,11 +565,11 @@ class TestCrabIntegration(unittest.TestCase):
         to support file_path/file_hint.
         """
         # FetchSourceArgs
-        args = FetchSourceArgs(fn_name="main", file_path="app.py")
+        args = FetchSourceArgs(fn_name="main", file_path="app.py", reasoning="test")
         self.assertEqual(args.file_path, "app.py")
 
         # GetMetadataArgs
-        meta_args = GetMetadataArgs(fn_name="main", file_path="app.py")
+        meta_args = GetMetadataArgs(fn_name="main", file_path="app.py", reasoning="test")
         self.assertEqual(meta_args.file_path, "app.py")
 
     @patch('milo.codereview.codereview.get_codereview_agent')
@@ -972,7 +970,7 @@ class TestCrabCoverageMocked(unittest.TestCase):
             ).model_dump()
         ]
         def agent_side_effect(payload):
-            if "OPEN or RESOLVED" in json.loads(payload)["request"]:
+            if "OPEN or RESOLVED" in payload:
                 return json.dumps([])
             return json.dumps(review_payload)
         mock_agent.call.side_effect = agent_side_effect
@@ -1123,7 +1121,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         final_assistant_msg = history[-1]
         self.assertEqual(final_assistant_msg['reasoning'], "Now I know the answer.")
         self.assertNotIn("<think>", final_assistant_msg['content'])
-        self.assertEqual(result, "[]")
+        self.assertEqual(result, "```json\n[]\n```")
 
     @patch('milo.agents.baseagent.OpenAI')
     def test_native_reasoning_content_extraction(self, mock_openai):
@@ -1187,7 +1185,7 @@ class TestAgentReasoningAndCondensation(unittest.TestCase):
         
         final_assistant_msg = history[-1]
         self.assertEqual(final_assistant_msg['reasoning'], "Now I know the answer natively.")
-        self.assertEqual(result, "[]")
+        self.assertEqual(result, "```json\n[]\n```")
 
     @patch('milo.agents.baseagent.OpenAI')
     def test_hallucinated_tool_call_parsing(self, mock_openai):

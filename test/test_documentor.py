@@ -215,10 +215,8 @@ class TestCombCoverageMocked(unittest.TestCase):
         mock_agent = MagicMock()
         mock_get_agent.return_value = mock_agent
         def side_effect(payload):
-            input_data = json.loads(payload)
-            code = input_data["method"]
             import re
-            match = re.search(r'def\s+(\w+)', code)
+            match = re.search(r'def\s+(\w+)', payload)
             method_name = match.group(1) if match else "unknown"
             return CommentedCode(method_name=method_name, documentation='\"\"\"Mock Doc\"\"\"').model_dump_json()
         mock_agent.call.side_effect = side_effect

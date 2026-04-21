@@ -45,33 +45,30 @@ class ReviewEngine:
         
         if hunk_text:
             request = (f"You are reviewing changes in `{file_path}`. "
-                       "The `diff_hunk` field contains the unified diff of modifications with line numbers on the left. "
-                       "The `method` field contains the full function source after applying changes. "
+                       "The `Diff` section below contains the unified diff of modifications with line numbers on the left. "
+                       "The `Full Source` section below contains the full function source after applying changes. "
                        f"Below is a JSON list of previously identified, currently OPEN issues for this function:\n{issues_json}\n"
                        "Review the new code and determine if the developer has resolved them.\n"
                        "Output a JSON array containing the `id`, the new `status` (OPEN or RESOLVED), and a `reason`.\n"
                        "IMPORTANT: Do NOT mention the virtual line numbers from the diff in your `reason`. Reference code snippets or variable names directly instead.")
         else:
             request = (f"You are reviewing changes in `{file_path}`. "
-                       "The `method` field contains the full function source after applying changes. "
+                       "The `Full Source` section below contains the full function source after applying changes. "
                        f"Below is a JSON list of previously identified, currently OPEN issues for this function:\n{issues_json}\n"
                        "Review the new code and determine if the developer has resolved them.\n"
                        "Output a JSON array containing the `id`, the new `status` (OPEN or RESOLVED), and a `reason`.\n"
                        "IMPORTANT: Do NOT mention the virtual line numbers from the code in your `reason`. Reference code snippets or variable names directly instead.")
 
-        user_prompt = ReviewInputCode(
-            language=lang,
-            method=code,
-            file_path=file_path,
-            diff_hunk=hunk_text,
-            request=request
-        )
+        user_prompt = f"{request}\n\n"
+        if hunk_text:
+            user_prompt += f"### Diff\n```diff\n{hunk_text}\n```\n\n"
+        user_prompt += f"### Full Source\n```{lang}\n{code}\n```"
         
         try:
             self.agent.clear_history()
             self.agent.set_format(VerificationListModel.json_schema())
             
-            response = self.agent.call(user_prompt.model_dump_json())
+            response = self.agent.call(user_prompt)
             response_json = json.loads(response)
             verifications = VerificationListModel.validate_python(response_json if isinstance(response_json, list) else [])
             return verifications
@@ -89,8 +86,8 @@ class ReviewEngine:
 
             if hunk_text:
                 request = (f"You are reviewing changes in `{file_path}`. "
-                           "The `diff_hunk` field contains the unified diff of modifications with line numbers on the left. "
-                           "The `method` field contains the full function source after applying changes. "
+                           "The `Diff` section below contains the unified diff of modifications with line numbers on the left. "
+                           "The `Full Source` section below contains the full function source after applying changes. "
                            "Analyze both added (+) and removed (-) lines. If removing code introduces a bug, report it, "
                            "but always anchor the line number of your feedback to a nearby added (+) or context ( ) line that still exists in the new code. "
                            "Do not comment on parts of the code that were not changed. "
@@ -99,30 +96,29 @@ class ReviewEngine:
                            "IMPORTANT: ONLY report actual defects, vulnerabilities, or required improvements. Do NOT report positive feedback, code explanations, or 'no action needed' comments. If there are no issues, return an empty array `[]`.\n"
                            f"{known_issues_text}\n"
                            "Return the result in JSON format using the schema provided. "
-                           "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
+                           "Use tools extensively to fetch further context from the repository graph to ensure code review relevance. "
+                           "However, DO NOT use tools to fetch the source code of the function currently under review, as it is already provided below.")
             else:
                 request = ("Please review the entire method source provided for potential bugs, style violations, or performance issues. "
-                           "The method code is provided with line numbers on the left. "
+                           "The `Full Source` code is provided with line numbers on the left. "
                            "When returning the line number, use the line number listed on the left side of the method code.\n"
                            "IMPORTANT: Do NOT mention the virtual line numbers in the `description` or `suggestion` fields. Reference the code snippets or variable names directly instead.\n"
                            "IMPORTANT: ONLY report actual defects, vulnerabilities, or required improvements. Do NOT report positive feedback, code explanations, or 'no action needed' comments. If there are no issues, return an empty array `[]`.\n"
                            f"{known_issues_text}\n"
                            "Return the result in JSON format using the schema provided. "
-                           "Use tools extensively to fetch further context from the repository graph to ensure code review relevance.")
+                           "Use tools extensively to fetch further context from the repository graph to ensure code review relevance. "
+                           "However, DO NOT use tools to fetch the source code of the function currently under review, as it is already provided below.")
 
-            user_prompt = ReviewInputCode(
-                language=lang,
-                method=code,
-                file_path=file_path,
-                diff_hunk=hunk_text,
-                request=request
-            )
+            user_prompt = f"{request}\n\n"
+            if hunk_text:
+                user_prompt += f"### Diff\n```diff\n{hunk_text}\n```\n\n"
+            user_prompt += f"### Full Source\n```{lang}\n{code}\n```"
             
             # Inject history if available
             self.agent.clear_history()
             self.agent.set_format(ReviewListModel.json_schema())
             
-            response = self.agent.call(user_prompt.model_dump_json())
+            response = self.agent.call(user_prompt)
             response_json = json.loads(response)
             reviews = ReviewListModel.validate_python(response_json if isinstance(response_json, list) else [])
             
