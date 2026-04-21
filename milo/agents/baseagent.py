@@ -199,7 +199,7 @@ class CompactContextProcessor(DefaultContextProcessor):
             if self.engine and tool_name != "delegate_research_task":
                 print(f"CompactContextProcessor: Compressing tool output ({len(content)} chars) with FusionEngine...")
                 try:
-                    result = self.engine.compress(content, content_type="text")
+                    result = self.engine.compress(content, content_type="code")
                     content = result.get("compressed", content)
                     #print(f"Compression results: {result.get('stats')}")
                 except Exception as e:
