@@ -287,6 +287,9 @@ def process_file_changes(file_path, file_content, hunks, review_store, review_en
             # Determine which target lines were actually changed
             changed_target_lines = []
             for i, line in enumerate(hunk):
+                # Ignore empty lines to prevent them from shifting the function mapping
+                if not line.value.strip():
+                    continue
                 if line.is_added:
                     changed_target_lines.append(line.target_line_no)
                 elif line.is_removed:

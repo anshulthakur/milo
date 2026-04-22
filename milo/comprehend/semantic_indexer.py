@@ -16,9 +16,9 @@ class SemanticIndexer:
         self.repo_path = repo_path
         self.repomap_dir = repomap_dir
         self.metadata_path = os.path.join(repomap_dir, "metadata.json")
-        self.agent = FunctionSummarizerAgent()
-        self.module_agent = ModuleSummarizerAgent()
-        self.arch_agent = ArchitectureSummarizerAgent()
+        self.agent = FunctionSummarizerAgent(repo_path=repo_path)
+        self.module_agent = ModuleSummarizerAgent(repo_path=repo_path)
+        self.arch_agent = ArchitectureSummarizerAgent(repo_path=repo_path)
         
         repo = get_repository(repo_path)
         self.rg = RepoGraph(repo)

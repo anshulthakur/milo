@@ -24,6 +24,7 @@ You have access to tools to:
 - Gather Neighboring functions in the call graph
 - Fetch Source code for functions
 - Delegate research tasks to a sub-agent to search for keywords, find definitions, usages, or trace variables without bloating your context.
+- Read file contents (paginated), list directories, and create or modify files using patches or snippets.
 
 You are encouraged to invoke multiple tool calls in parallel to retrieve information.
 

@@ -1,6 +1,10 @@
+import os
 from typing import Callable
 from pydantic import BaseModel, Field
 from typing import Optional
+
+from milo.comprehend.browser import list_directory, tree_directory
+from milo.comprehend.editor import create_file, apply_diff, replace_snippet
 
 
 class BaseToolArgs(BaseModel):
@@ -124,6 +128,13 @@ class DelegateTaskArgs(BaseToolArgs):
     context: str = Field(..., description="Brief context on why this is being asked, so the sub-agent understands the perspective without getting distracted by the overall objective.")
 
 
+class ReadFileArgs(BaseToolArgs):
+    file_path: str = Field(..., description="The path of the file to read, relative to the repository root.")
+    start_line: Optional[int] = Field(None, description="The starting line number (1-based) to read from.")
+    end_line: Optional[int] = Field(None, description="The ending line number (1-based) to read to.")
+    page: Optional[int] = Field(1, description="Page number of the results to fetch. Default is 1.")
+
+
 # ---- Tool Builder ----
 def build_tool(
     name: str, description: str, model: type[BaseModel], func: Callable
@@ -172,3 +183,76 @@ def build_tool(
         func=wrapped_func,
         schema=model,
     )
+
+def get_filesystem_tools(repo_path: str) -> list[Tool]:
+    def ls_dir(target_path: str = ".", **kwargs) -> str:
+        return list_directory(repo_path, target_path)
+
+    def tree_dir(target_path: str = ".", depth: int = 2, **kwargs) -> str:
+        return tree_directory(repo_path, target_path, depth)
+
+    def c_file(file_path: str, content: str, **kwargs) -> str:
+        return create_file(repo_path, file_path, content)
+
+    def p_file(file_path: str, diff: str, **kwargs) -> str:
+        return apply_diff(repo_path, file_path, diff)
+
+    def r_snippet(file_path: str, search_text: str, replace_text: str, **kwargs) -> str:
+        return replace_snippet(repo_path, file_path, search_text, replace_text)
+
+    def read_file_tool(file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, page: int = 1, **kwargs) -> dict:
+        try:
+            full_path = os.path.join(repo_path, file_path)
+            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except Exception as e:
+            return {"error": str(e)}
+
+        start_idx = max(0, start_line - 1) if start_line is not None else 0
+        end_idx = min(len(lines), end_line) if end_line is not None else len(lines)
+
+        if start_idx >= len(lines) or start_idx >= end_idx:
+            return {"page": page, "has_more_pages": False, "content": ""}
+
+        selected_lines = lines[start_idx:end_idx]
+        page_size = int(os.environ.get('READ_FILE_PAGE_SIZE', '4000'))
+
+        chars_skipped = 0
+        chars_included = 0
+        target_skip = (page - 1) * page_size
+        
+        has_more = False
+        included_lines = []
+        
+        for line in selected_lines:
+            line_len = len(line)
+            if chars_skipped < target_skip:
+                if chars_skipped + line_len <= target_skip:
+                    chars_skipped += line_len
+                    continue
+                else:
+                    chars_included += line_len
+                    chars_skipped = target_skip
+                    included_lines.append(line.rstrip('\n'))
+            else:
+                if chars_included + line_len <= page_size or chars_included == 0:
+                    chars_included += line_len
+                    included_lines.append(line.rstrip('\n'))
+                else:
+                    has_more = True
+                    break
+
+        return {
+            "page": page,
+            "has_more_pages": has_more,
+            "content": "\n".join(included_lines)
+        }
+
+    return [
+        build_tool("list_directory", "Lists the contents of a directory in the repo.", ListDirectoryArgs, ls_dir),
+        build_tool("tree_directory", "Shows a tree view of a directory.", TreeDirectoryArgs, tree_dir),
+        build_tool("create_file", "Creates a new file with the specified content.", CreateFileArgs, c_file),
+        build_tool("replace_snippet", "Replaces an exact snippet of code in an existing file. This is the preferred way to modify existing files.", ReplaceSnippetArgs, r_snippet),
+        build_tool("apply_diff", "Modifies an existing file by applying a unified diff patch.", ApplyDiffArgs, p_file),
+        build_tool("read_file", "Reads the content of a file, with optional line range and pagination.", ReadFileArgs, read_file_tool),
+    ]

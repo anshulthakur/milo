@@ -5,6 +5,7 @@ from typing import Dict
 from pydantic import BaseModel, Field
 
 from milo.agents.baseagent import Agent, LLM_ENDPOINT
+from milo.agents.tools import get_filesystem_tools
 
 
 class FunctionSummaryOutput(BaseModel):
@@ -12,11 +13,12 @@ class FunctionSummaryOutput(BaseModel):
 
 
 class FunctionSummarizerAgent(Agent):
-    def __init__(self, endpoint=LLM_ENDPOINT):
+    def __init__(self, endpoint=LLM_ENDPOINT, repo_path=None):
         schema_str = json.dumps(FunctionSummaryOutput.model_json_schema(), indent=2)
+        tools = get_filesystem_tools(repo_path) if repo_path else []
         super().__init__(
             name="FunctionSummarizer",
-            tools=[],
+            tools=tools,
             model=os.environ.get("GENERIC_MODEL", "miloagent"), # Using a more capable model than ToolSummary
             endpoint=endpoint,
             system_prompt=(

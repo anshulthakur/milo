@@ -63,13 +63,13 @@ class TestRepoComprehensionAgent(unittest.TestCase):
     def test_view_architecture_tool(self):
         agent = get_repocomprehension_agent(str(self.tmp_dir), str(self.metadata_path))
         tool = agent.tools["view_architecture"]
-        res = tool.func()
+        res = tool.func(reasoning="test")
         self.assertIn("System entry point that calls helper.", res)
         
     def test_inspect_module_tool(self):
         agent = get_repocomprehension_agent(str(self.tmp_dir), str(self.metadata_path))
         tool = agent.tools["inspect_module"]
-        res = tool.func(module_name="main.py")
+        res = tool.func(module_name="main.py", reasoning="test")
         self.assertIn("Main module.", res)
         self.assertIn("main.py::main", res)
         self.assertIn("Main function.", res)
@@ -77,7 +77,7 @@ class TestRepoComprehensionAgent(unittest.TestCase):
     def test_inspect_call_flow_tool(self):
         agent = get_repocomprehension_agent(str(self.tmp_dir), str(self.metadata_path))
         tool = agent.tools["inspect_call_flow"]
-        res = tool.func(entry_function="main.py::main")
+        res = tool.func(entry_function="main.py::main", reasoning="test")
         self.assertIn("main.py::main", res)
         self.assertIn("helper.py::helper", res)
         self.assertIn("Helper function.", res)
@@ -88,7 +88,7 @@ class TestRepoComprehensionAgent(unittest.TestCase):
         file_path = self.tmp_dir / "test_replace.txt"
         file_path.write_text("def hello():\n    print('Hello')\n", encoding="utf-8")
         
-        res = tool.func(file_path="test_replace.txt", search_text="print('Hello')", replace_text="print('Hello World')")
+        res = tool.func(file_path="test_replace.txt", search_text="print('Hello')", replace_text="print('Hello World')", reasoning="test")
 
         self.assertIn("Successfully replaced snippet", res)
         self.assertIn("-    print('Hello')", res)
@@ -98,7 +98,7 @@ class TestRepoComprehensionAgent(unittest.TestCase):
     def test_create_file_tool(self):
         agent = get_repocomprehension_agent(str(self.tmp_dir), str(self.metadata_path))
         tool = agent.tools["create_file"]
-        res = tool.func(file_path="test_create.txt", content="Hello World")
+        res = tool.func(file_path="test_create.txt", content="Hello World", reasoning="test")
         self.assertIn("Successfully created", res)
         file_path = self.tmp_dir / "test_create.txt"
         self.assertTrue(file_path.exists())
@@ -111,7 +111,7 @@ class TestRepoComprehensionAgent(unittest.TestCase):
         file_path.write_text("line1\nline2\n", encoding="utf-8")
         
         diff_content = "--- test_patch.txt\n+++ test_patch.txt\n@@ -1,2 +1,2 @@\n line1\n-line2\n+line3\n"
-        res = tool.func(file_path="test_patch.txt", diff=diff_content)
+        res = tool.func(file_path="test_patch.txt", diff=diff_content, reasoning="test")
         self.assertIn("Successfully applied diff", res)
         self.assertEqual(file_path.read_text(encoding="utf-8"), "line1\nline3\n")
 
@@ -151,10 +151,9 @@ class TestRepoComprehensionE2E(unittest.TestCase):
         self.assertIsNotNone(response)
         
         # Ensure that it actually invoked the required tools during its thought process
-        # The CompactContextProcessor transforms tool calls into assistant messages with specific content.
         tool_calls = [
             msg for msg in agent.history 
-            if msg.get('role') == 'assistant' and '[Tool Call] Name: view_architecture' in msg.get('content', '')
+            if msg.get('role') == 'assistant' and msg.get('tool_calls') and any(tc['function']['name'] == 'view_architecture' for tc in msg['tool_calls'])
         ]
         self.assertGreaterEqual(len(tool_calls), 1, "Agent should have called 'view_architecture' tool")
         
@@ -172,7 +171,7 @@ class TestRepoComprehensionE2E(unittest.TestCase):
         
         tool_calls_create = [
             msg for msg in agent.history 
-            if msg.get('role') == 'assistant' and '[Tool Call] Name: create_file' in msg.get('content', '')
+            if msg.get('role') == 'assistant' and msg.get('tool_calls') and any(tc['function']['name'] == 'create_file' for tc in msg['tool_calls'])
         ]
         self.assertGreaterEqual(len(tool_calls_create), 1, "Agent should have called 'create_file' tool")
         
@@ -186,7 +185,7 @@ class TestRepoComprehensionE2E(unittest.TestCase):
         # Check for replace_snippet call
         tool_calls_replace = [
             msg for msg in agent.history 
-            if msg.get('role') == 'assistant' and '[Tool Call] Name: replace_snippet' in msg.get('content', '')
+            if msg.get('role') == 'assistant' and msg.get('tool_calls') and any(tc['function']['name'] == 'replace_snippet' for tc in msg['tool_calls'])
         ]
         self.assertGreaterEqual(len(tool_calls_replace), 1, "Agent should have called 'replace_snippet' tool")
         

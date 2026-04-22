@@ -13,6 +13,7 @@ from milo.agents.tools import (
     GetNeighborsArgs,
     GrepContext,
     DelegateTaskArgs,
+    get_filesystem_tools
 )
 
 comb_agent = None
@@ -23,7 +24,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
         G, metadata = load_repo_graph(json_path=metadata_path)
         
         def get_subagent_tools():
-            return [
+            sub_tools = [
                 build_tool(
                     "fetch_source_snippet",
                     "Fetch the source code implementation of a function from the repo.",
@@ -55,6 +56,9 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
                     lambda query, file_path=None, page=1, ast_context=False: grep_ast(query=query, file_hint=file_path, repo_path=repo_path, page=page, ast_context=ast_context),
                 ),
             ]
+            if repo_path:
+                sub_tools.extend(get_filesystem_tools(repo_path))
+            return sub_tools
             
         def delegate_task(task: str, context: str) -> str:
             subagent = Agent(
@@ -98,6 +102,8 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
                 delegate_task
             )
         ]
+        if repo_path:
+            tools.extend(get_filesystem_tools(repo_path))
         
         comb_agent = Agent(
             name="DocumentationAgent",

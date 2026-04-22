@@ -38,13 +38,22 @@ class DiffUtils:
         This is used to provide the LLM with exact line numbers for reporting issues.
         """
         lines = []
-        for line in hunk:
+        for i, line in enumerate(hunk):
             if line.is_added:
                 prefix = "+"
                 line_no = line.target_line_no
             elif line.is_removed:
                 prefix = "-"
-                line_no = line.source_line_no
+                line_no = None
+                for j in range(i + 1, len(hunk)):
+                    if hunk[j].target_line_no is not None:
+                        line_no = hunk[j].target_line_no
+                        break
+                if line_no is None:
+                    for j in range(i - 1, -1, -1):
+                        if hunk[j].target_line_no is not None:
+                            line_no = hunk[j].target_line_no
+                            break
             elif line.is_context:
                 prefix = " "
                 line_no = line.target_line_no or line.source_line_no
@@ -66,13 +75,22 @@ class DiffUtils:
         line_map = {}
         virtual_line = 1
         
-        for line in hunk:
+        for i, line in enumerate(hunk):
             if line.is_added:
                 prefix = "+"
                 actual_line = line.target_line_no
             elif line.is_removed:
                 prefix = "-"
-                actual_line = line.source_line_no
+                actual_line = None
+                for j in range(i + 1, len(hunk)):
+                    if hunk[j].target_line_no is not None:
+                        actual_line = hunk[j].target_line_no
+                        break
+                if actual_line is None:
+                    for j in range(i - 1, -1, -1):
+                        if hunk[j].target_line_no is not None:
+                            actual_line = hunk[j].target_line_no
+                            break
             else:
                 prefix = " "
                 actual_line = line.target_line_no or line.source_line_no or 0

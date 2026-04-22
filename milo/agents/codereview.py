@@ -8,6 +8,7 @@ from milo.agents.tools import (
     GetNeighborsArgs,
     GrepContext,
     DelegateTaskArgs,
+    get_filesystem_tools
 )
 
 from milo.codesift.repobrowser import load_repo_graph
@@ -77,7 +78,7 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
         G, metadata = load_repo_graph(json_path=metadata_path)
         
         def get_subagent_tools():
-            return [
+            sub_tools = [
                 build_tool(
                     "fetch_source_snippet",
                     "Fetch the source code implementation of a function from the repo.",
@@ -119,6 +120,9 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
                     ),
                 ),
             ]
+            if repo_path:
+                sub_tools.extend(get_filesystem_tools(repo_path))
+            return sub_tools
             
         def delegate_task(task: str, context: str) -> str:
             subagent = Agent(
@@ -168,6 +172,8 @@ def get_agent(metadata_path=None, repo_path=None, repo_name=None):
                 delegate_task
             )
         ]
+        if repo_path:
+            tools.extend(get_filesystem_tools(repo_path))
         
         code_review_agent = Agent(
             name="CodeReviewOrchestrator",

@@ -9,15 +9,9 @@ from milo.agents.tools import (
     InspectModuleArgs, 
     InspectCallFlowArgs, 
     FetchSourceArgs, 
-    ListDirectoryArgs, 
-    TreeDirectoryArgs,
-    CreateFileArgs,
-    ApplyDiffArgs,
-    ReplaceSnippetArgs
+    get_filesystem_tools
 )
 from milo.codesift.repobrowser import fetch_source_snippet, load_repo_graph, resolve_function_name
-from milo.comprehend.browser import list_directory, tree_directory
-from milo.comprehend.editor import create_file, apply_diff, replace_snippet
 
 def get_repocomprehension_agent(repo_path: str, metadata_path: str, endpoint: str = LLM_ENDPOINT) -> Agent:
     
@@ -92,32 +86,13 @@ def get_repocomprehension_agent(repo_path: str, metadata_path: str, endpoint: st
     def read_function_code(fn_name: str, file_path: Optional[str] = None) -> str:
         return fetch_source_snippet(fn_name, G, metadata, repo_path=repo_path, file_hint=file_path)
 
-    def ls_dir(target_path: str = ".") -> str:
-        return list_directory(repo_path, target_path)
-
-    def tree_dir(target_path: str = ".", depth: int = 2) -> str:
-        return tree_directory(repo_path, target_path, depth)
-        
-    def c_file(file_path: str, content: str) -> str:
-        return create_file(repo_path, file_path, content)
-
-    def p_file(file_path: str, diff: str) -> str:
-        return apply_diff(repo_path, file_path, diff)
-        
-    def r_snippet(file_path: str, search_text: str, replace_text: str) -> str:
-        return replace_snippet(repo_path, file_path, search_text, replace_text)
-        
     tools = [
         build_tool("view_architecture", "Returns high-level system summaries and lists of entry points. Use this to understand the big picture first.", ViewArchitectureArgs, view_architecture),
         build_tool("inspect_module", "Returns the summary for a specific file, plus a list of its functions and their 1-sentence summaries.", InspectModuleArgs, inspect_module),
         build_tool("inspect_call_flow", "Returns a list of function summaries that are called (directly or indirectly) originating from a specific entry point.", InspectCallFlowArgs, inspect_call_flow),
         build_tool("read_function_code", "Returns the raw source code of a function. Use this when you need exact implementation details.", FetchSourceArgs, read_function_code),
-        build_tool("list_directory", "Lists the contents of a directory in the repo.", ListDirectoryArgs, ls_dir),
-        build_tool("tree_directory", "Shows a tree view of a directory.", TreeDirectoryArgs, tree_dir),
-        build_tool("create_file", "Creates a new file with the specified content.", CreateFileArgs, c_file),
-        build_tool("replace_snippet", "Replaces an exact snippet of code in an existing file. This is the preferred way to modify existing files.", ReplaceSnippetArgs, r_snippet),
-        build_tool("apply_diff", "Modifies an existing file by applying a unified diff patch.", ApplyDiffArgs, p_file),
     ]
+    tools.extend(get_filesystem_tools(repo_path))
 
     system_prompt = (
         "You are the RepoComprehensionAgent, an expert software navigator.\n"
@@ -126,7 +101,7 @@ def get_repocomprehension_agent(repo_path: str, metadata_path: str, endpoint: st
         "1. ZOOM OUT: Start by calling `view_architecture` to understand the system entry points and high-level flows.\n"
         "2. MEDIUM ZOOM: Call `inspect_module` on relevant files discovered in step 1 to see their overarching responsibilities and contained functions.\n"
         "3. TRACE: Call `inspect_call_flow` on specific entry points to see the semantic function trace.\n"
-        "4. ZOOM IN: ONLY when you need exact implementation details (e.g., to write code or find bugs), call `read_function_code`.\n"
+        "4. ZOOM IN: ONLY when you need exact implementation details (e.g., to write code or find bugs), call `read_function_code` or `read_file`.\n"
         "5. EDIT: When instructed to modify code, use `replace_snippet` to target and replace exact blocks of existing code. For creating entirely new files, use `create_file`.\n"
         "Always synthesize your findings into a clear, concise answer for the user."
     )
